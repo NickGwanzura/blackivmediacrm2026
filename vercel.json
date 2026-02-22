@@ -4,9 +4,6 @@
   "installCommand": "npm install",
   "framework": "vite",
   "outputDirectory": "dist",
-  "env": {
-    "API_KEY": "@api_key"
-  },
   "rewrites": [
     {
       "source": "/(.*)",
