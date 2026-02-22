@@ -1,0 +1,110 @@
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    
+    <!-- SEO & Social Media Metadata -->
+    <title>Black Ivy Media</title>
+    <meta name="description" content="Premium Outdoor Advertising Management System. Command the view with Black Ivy Media's comprehensive fleet management, CRM, and financial platform." />
+    
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://blackivymedia.co.zw/" />
+    <meta property="og:title" content="Black Ivy Media | Command The View" />
+    <meta property="og:description" content="Premium Outdoor Advertising Management System. Command the view with Black Ivy Media's comprehensive fleet management, CRM, and financial platform." />
+    <meta property="og:image" content="https://images.unsplash.com/photo-1562654501-a0ccc0fc3fb1?q=80&w=1932&auto=format&fit=crop" />
+
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image" />
+    <meta property="twitter:url" content="https://blackivymedia.co.zw/" />
+    <meta property="twitter:title" content="Black Ivy Media | Command The View" />
+    <meta property="twitter:description" content="Premium Outdoor Advertising Management System. Command the view with Black Ivy Media's comprehensive fleet management, CRM, and financial platform." />
+    <meta property="twitter:image" content="https://images.unsplash.com/photo-1562654501-a0ccc0fc3fb1?q=80&w=1932&auto=format&fit=crop" />
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      // Polyfill process.env for browser environments to prevent crashes in modules
+      window.process = window.process || { env: { API_KEY: '' } };
+      
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              primary: '#000000', // Black
+              secondary: '#1c1917', // Stone 900
+              accent: '#f97316', // Orange 500 (matching the logo)
+              success: '#10b981', // Emerald 500
+              warning: '#f59e0b', // Amber 500
+              danger: '#ef4444', // Red 500
+            },
+            fontFamily: {
+              sans: ['Inter', 'sans-serif'],
+              display: ['Montserrat', 'sans-serif'], // Added for Logo if needed
+            },
+            animation: {
+              'blob': 'blob 7s infinite',
+              'fade-in': 'fadeIn 0.5s ease-out forwards',
+            },
+            keyframes: {
+              blob: {
+                '0%': { transform: 'translate(0px, 0px) scale(1)' },
+                '33%': { transform: 'translate(30px, -50px) scale(1.1)' },
+                '66%': { transform: 'translate(-20px, 20px) scale(0.9)' },
+                '100%': { transform: 'translate(0px, 0px) scale(1)' },
+              },
+              fadeIn: {
+                'from': { opacity: '0', transform: 'translateY(10px)' },
+                'to': { opacity: '1', transform: 'translateY(0)' },
+              }
+            }
+          }
+        }
+      }
+    </script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Montserrat:wght@800;900&display=swap');
+      
+      body {
+        font-family: 'Inter', sans-serif;
+        background-color: #f8fafc;
+        background-image: 
+          radial-gradient(at 0% 0%, rgba(0, 0, 0, 0.03) 0px, transparent 50%),
+          radial-gradient(at 100% 100%, rgba(249, 115, 22, 0.05) 0px, transparent 50%);
+        background-attachment: fixed;
+      }
+
+      /* Custom scrollbar for tables */
+      .scrollbar-hide::-webkit-scrollbar {
+          display: none;
+      }
+      .scrollbar-hide {
+          -ms-overflow-style: none;
+          scrollbar-width: none;
+      }
+    </style>
+<script type="importmap">
+{
+  "imports": {
+    "vite": "https://aistudiocdn.com/vite@^7.2.7",
+    "recharts": "https://aistudiocdn.com/recharts@^3.5.1",
+    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.556.0",
+    "react/": "https://aistudiocdn.com/react@^19.2.1/",
+    "react": "https://aistudiocdn.com/react@^19.2.1",
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.31.0",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.1/",
+    "@vitejs/plugin-react": "https://aistudiocdn.com/@vitejs/plugin-react@^5.1.1",
+    "leaflet": "https://aistudiocdn.com/leaflet@^1.9.4",
+    "jspdf-autotable": "https://aistudiocdn.com/jspdf-autotable@^5.0.2",
+    "jspdf": "https://aistudiocdn.com/jspdf@^3.0.4"
+  }
+}
+</script>
+</head>
+  <body class="text-slate-900 antialiased selection:bg-orange-500 selection:text-white">
+    <div id="root"></div>
+    <script type="module" src="./index.tsx"></script>
+  </body>
+</html>
