@@ -14,4 +14,4 @@ COPY --from=build /app/dist ./dist
 
 ENV PORT=8080
 EXPOSE 8080
-CMD ["sh", "-c", "serve -s dist -l tcp://0.0.0.0:${PORT}"]
+CMD ["sh", "-c", "echo \"Starting serve on 0.0.0.0:${PORT}\" && serve -s dist --listen ${PORT} --no-clipboard"]
