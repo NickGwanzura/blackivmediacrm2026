@@ -3,7 +3,7 @@ const path = require('path');
 const cookieParser = require('cookie-parser');
 const { sql } = require('./db');
 const { Resend } = require('resend');
-const { createAuthRouter, requireAuth, requireRole, ensureInitialAdmin } = require('./auth');
+const { createAuthRouter, requireAuth, requireRole, ensureInitialAdmin, toClientUser } = require('./auth');
 const { runMigrations } = require('./migrate');
 
 const app = express();
@@ -115,17 +115,12 @@ app.get('/sync/all', requireAuth, async (_req, res) => {
     const rows = await sql`SELECT key, value FROM app_data`;
     const out = {};
     for (const r of rows) out[r.key] = r.value;
-    const stripUser = (u) => {
-      if (!u || typeof u !== 'object') return u;
-      const { password, password_reset_token, password_reset_expires, ...rest } = u;
-      return rest;
-    };
-    if (Array.isArray(out.users)) {
-      out.users = out.users.map(stripUser);
-    } else if (out.users && typeof out.users === 'object') {
-      // Legacy blob wrote users as an object keyed by id. Strip either way.
-      out.users = Object.fromEntries(Object.entries(out.users).map(([k, v]) => [k, stripUser(v)]));
-    }
+    // Users are authoritative in the `users` SQL table (auth.js owns writes
+    // via /auth/invite, /auth/register, /auth/approve, etc). The `app_data`
+    // users blob is a legacy cache and can drift. Always overwrite it with
+    // the live table so Settings → User Access Control sees every account.
+    const userRows = await sql`SELECT * FROM users ORDER BY created_at ASC NULLS LAST, id ASC`;
+    out.users = userRows.map(toClientUser);
     res.json(out);
   } catch (e) {
     res.status(500).json({ error: e.message });

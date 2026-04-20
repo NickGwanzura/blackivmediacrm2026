@@ -676,5 +676,6 @@ module.exports = {
   requireAuth,
   requireRole,
   ensureInitialAdmin,
+  toClientUser,
   COOKIE_NAME,
 };
