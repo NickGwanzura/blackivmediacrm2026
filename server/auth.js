@@ -188,6 +188,71 @@ function requireRole(...allowedRoles) {
   };
 }
 
+// ---- Branded email shell (table-based layout for email-client compat) ----
+function renderBrandedEmail({ sender, preheader, heading, greeting, bodyHtml, ctaLabel, ctaUrl, ctaStyle, footnote }) {
+  const safeSender = (sender || 'Black Ivy Media').toUpperCase();
+  const accent = '#f97316';
+  const ink = '#0f172a';
+  const muted = '#64748b';
+  const ctaBg = ctaStyle === 'accent' ? accent : '#000000';
+  const preheaderHtml = preheader
+    ? `<div style="display:none; overflow:hidden; line-height:1px; font-size:1px; color:transparent; opacity:0; max-height:0; max-width:0;">${preheader}</div>`
+    : '';
+  const ctaHtml = ctaUrl && ctaLabel
+    ? `<table cellpadding="0" cellspacing="0" border="0" style="margin:0 0 28px;"><tr><td style="border-radius:10px; background:${ctaBg};">
+         <a href="${ctaUrl}" style="display:inline-block; padding:14px 32px; color:#ffffff; font-size:14px; font-weight:700; text-decoration:none; letter-spacing:0.02em; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">${ctaLabel} &rarr;</a>
+       </td></tr></table>`
+    : '';
+  const greetingHtml = greeting ? `<p style="margin:0 0 20px; color:${muted}; font-size:14px;">${greeting}</p>` : '';
+  const footnoteHtml = footnote ? `<p style="margin:0; color:#94a3b8; font-size:12px; line-height:1.6;">${footnote}</p>` : '';
+  return `<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>${heading || safeSender}</title></head>
+<body style="margin:0; padding:0; background:#f1f5f9;">
+${preheaderHtml}
+<table width="100%" cellpadding="0" cellspacing="0" border="0" role="presentation" style="background:#f1f5f9; margin:0; padding:0;">
+  <tr><td align="center" style="padding:40px 16px; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
+    <table width="600" cellpadding="0" cellspacing="0" border="0" role="presentation" style="max-width:600px; width:100%; background:#ffffff; border-radius:16px; overflow:hidden; box-shadow:0 4px 24px rgba(15,23,42,0.06);">
+      <tr><td style="background:#000000; padding:28px 40px;">
+        <table width="100%" cellpadding="0" cellspacing="0" border="0" role="presentation"><tr>
+          <td style="font-size:20px; font-weight:900; letter-spacing:-0.03em; color:#ffffff; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">${safeSender}</td>
+          <td align="right" style="font-size:10px; letter-spacing:0.18em; text-transform:uppercase; font-weight:700; color:${accent}; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">Command the View</td>
+        </tr></table>
+      </td></tr>
+      <tr><td style="height:4px; background:${accent}; line-height:4px; font-size:4px;">&nbsp;</td></tr>
+      <tr><td style="padding:40px; color:${ink}; font-size:15px; line-height:1.65; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
+        <h1 style="margin:0 0 10px; font-size:26px; font-weight:800; color:${ink}; letter-spacing:-0.02em; line-height:1.2;">${heading}</h1>
+        ${greetingHtml}
+        <div style="margin:0 0 24px;">${bodyHtml}</div>
+        ${ctaHtml}
+        ${footnoteHtml}
+      </td></tr>
+      <tr><td style="background:#fafafa; padding:24px 40px; border-top:1px solid #e5e7eb;">
+        <p style="margin:0 0 4px; color:${muted}; font-size:13px; font-weight:700; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">${sender || 'Black Ivy Media'}</p>
+        <p style="margin:0; color:#94a3b8; font-size:11px; line-height:1.6; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">Premium outdoor advertising management &middot; Harare, Zimbabwe</p>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>
+</body></html>`;
+}
+
+function renderCredentialBlock({ email, tempPassword }) {
+  return `<table width="100%" cellpadding="0" cellspacing="0" border="0" role="presentation" style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; margin:0 0 28px;">
+    <tr><td style="padding:20px 24px;">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" role="presentation">
+        <tr>
+          <td style="padding:6px 0; color:#94a3b8; font-size:11px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; width:130px; vertical-align:top;">Email</td>
+          <td style="padding:6px 0; font-size:14px; color:#0f172a;"><strong>${email}</strong></td>
+        </tr>
+        <tr>
+          <td style="padding:6px 0; color:#94a3b8; font-size:11px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; vertical-align:top;">Password</td>
+          <td style="padding:6px 0;"><code style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace; background:#ffffff; border:1px solid #e2e8f0; padding:6px 12px; border-radius:6px; font-size:13px; color:#0f172a; font-weight:600; display:inline-block;">${tempPassword}</code></td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>`;
+}
+
 // ---- Email helper (server-side Resend) ----
 async function sendAuthEmail(resendClient, { to, subject, html }) {
   if (!resendClient) {
@@ -383,14 +448,16 @@ function createAuthRouter({ resendClient, getCompanyName }) {
         }
         const resetUrl = `${appUrl}/?reset=${encodeURIComponent(token)}`;
         const sender = (getCompanyName && getCompanyName()) || 'Black Ivy Media';
-        const html = `
-          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; color:#1e293b; line-height:1.55; font-size:14px; max-width:560px;">
-            <p>Hi ${row.first_name || ''},</p>
-            <p>We received a request to reset your <strong>${sender}</strong> password.</p>
-            <p><a href="${resetUrl}" style="display:inline-block; padding:10px 18px; background:#0f172a; color:#fff; border-radius:8px; text-decoration:none; font-weight:600;">Set a new password</a></p>
-            <p style="color:#64748b; font-size:12px;">This link expires in one hour. If you didn't request a reset, you can safely ignore this email.</p>
-            <p style="margin-top:24px;">Kind regards,<br/><strong>${sender}</strong></p>
-          </div>`.trim();
+        const html = renderBrandedEmail({
+          sender,
+          preheader: `Reset your ${sender} password. This link expires in one hour.`,
+          heading: 'Reset your password',
+          greeting: `Hi ${row.first_name || 'there'},`,
+          bodyHtml: `<p style="margin:0;">We received a request to reset your <strong>${sender}</strong> password. Click the button below to set a new one.</p>`,
+          ctaLabel: 'Set a new password',
+          ctaUrl: resetUrl,
+          footnote: `This link expires in one hour. If you didn't request a reset, you can safely ignore this email &mdash; no changes will be made.`,
+        });
         await sendAuthEmail(resendClient, { to: row.email, subject: `Reset your ${sender} password`, html });
       }
     } catch (e) {
@@ -481,13 +548,17 @@ function createAuthRouter({ resendClient, getCompanyName }) {
       if (!appUrl) {
         console.error('[auth] /approve: skipping approval email — APP_URL not set in production.');
       } else {
-        const html = `
-          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; color:#1e293b; line-height:1.55; font-size:14px; max-width:560px;">
-            <p>Hi ${row.first_name || ''},</p>
-            <p>Your account at <strong>${sender}</strong> has been approved by an administrator. You can now sign in.</p>
-            <p><a href="${appUrl}" style="display:inline-block; padding:10px 18px; background:#059669; color:#fff; border-radius:8px; text-decoration:none; font-weight:600;">Sign in</a></p>
-            <p style="margin-top:24px;">Kind regards,<br/><strong>${sender}</strong></p>
-          </div>`.trim();
+        const html = renderBrandedEmail({
+          sender,
+          preheader: `Your ${sender} account has been approved. Sign in any time.`,
+          heading: "You're in.",
+          greeting: `Welcome, ${row.first_name || 'there'}.`,
+          bodyHtml: `<p style="margin:0;">Your <strong>${sender}</strong> account has been approved by an administrator. You can now sign in and start managing your inventory, clients, and contracts.</p>`,
+          ctaLabel: 'Sign in',
+          ctaUrl: appUrl,
+          ctaStyle: 'accent',
+          footnote: 'If this is your first time signing in, you will be prompted to change your password.',
+        });
         await sendAuthEmail(resendClient, { to: row.email, subject: `Account approved — welcome to ${sender}`, html });
       }
       const fresh = await findUserById(userId);
@@ -522,18 +593,20 @@ function createAuthRouter({ resendClient, getCompanyName }) {
       if (!appUrl) {
         console.error('[auth] /invite: skipping invite email — APP_URL not set in production. Temp password was not emailed; share it via a secure side channel or re-run after configuring APP_URL.');
       } else {
-        const html = `
-          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; color:#1e293b; line-height:1.55; font-size:14px; max-width:560px;">
-            <p>You've been invited to join <strong>${sender}</strong> as a <strong>${role}</strong>.</p>
-            <p>Please sign in with the temporary credentials below. Your account will activate once an administrator approves it.</p>
-            <table style="margin:16px 0; border-collapse:collapse; font-size:13px;">
-              <tr><td style="padding:4px 16px 4px 0; color:#64748b;">Email</td><td style="padding:4px 0;"><strong>${email}</strong></td></tr>
-              <tr><td style="padding:4px 16px 4px 0; color:#64748b;">Temporary password</td><td style="padding:4px 0;"><code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background:#f1f5f9; padding:4px 10px; border-radius:6px;">${tempPassword}</code></td></tr>
-              <tr><td style="padding:4px 16px 4px 0; color:#64748b;">Sign in at</td><td style="padding:4px 0;"><a href="${appUrl}" style="color:#2563eb;">${appUrl}</a></td></tr>
-            </table>
-            <p style="color:#64748b; font-size:12px;">You will be required to change this password after first sign in.</p>
-            <p style="margin-top:24px;">Kind regards,<br/><strong>${sender}</strong></p>
-          </div>`.trim();
+        const bodyHtml = `
+          <p style="margin:0 0 20px;">You've been invited to join <strong>${sender}</strong> as a <strong style="color:#f97316;">${role}</strong>. Your account is ready &mdash; sign in with the credentials below.</p>
+          ${renderCredentialBlock({ email, tempPassword })}
+        `;
+        const html = renderBrandedEmail({
+          sender,
+          preheader: `You've been invited to ${sender}. Sign in with the credentials inside.`,
+          heading: "You're invited.",
+          greeting: `Welcome aboard, ${firstName}.`,
+          bodyHtml,
+          ctaLabel: `Sign in to ${sender}`,
+          ctaUrl: appUrl,
+          footnote: 'For security, you will be asked to change this password on first sign-in. Your account activates once an administrator approves the invite.',
+        });
         await sendAuthEmail(resendClient, { to: email, subject: `You've been invited to ${sender}`, html });
       }
       const fresh = await findUserById(id);
