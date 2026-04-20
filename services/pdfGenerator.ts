@@ -10,6 +10,21 @@ const COLOR_ACCENT = [249, 115, 22]; // Orange 500
 const COLOR_TEXT = [51, 65, 85]; // Slate 700
 const COLOR_TEXT_LIGHT = [100, 116, 139]; // Slate 500
 
+export interface PdfBase64 { filename: string; base64: string; }
+export interface PdfOutputOptions { asBase64?: boolean; }
+
+// Either saves the PDF locally (default) or returns it as base64 for upload.
+// Keeping both paths in one helper avoids leaking save-vs-email logic into
+// every generator.
+const finalizePdf = (doc: jsPDF, filename: string, options?: PdfOutputOptions): PdfBase64 | void => {
+    if (options?.asBase64) {
+        const dataUri = doc.output('datauristring');
+        const base64 = dataUri.includes(';base64,') ? dataUri.split(';base64,')[1] : dataUri;
+        return { filename, base64 };
+    }
+    doc.save(filename);
+};
+
 // Helper to safely execute autoTable regardless of import structure
 const runAutoTable = (doc: any, options: any) => {
     try {
@@ -346,7 +361,7 @@ export const generateActiveClientsPDF = (clients: Client[]) => {
     } catch(e) { console.error(e); alert("Failed to generate report."); }
 };
 
-export const generateInvoicePDF = (invoice: Invoice, client: Client) => {
+export const generateInvoicePDF = (invoice: Invoice, client: Client, options?: PdfOutputOptions): PdfBase64 | void => {
   try {
     const doc = new jsPDF();
     let currentY = addCompanyHeader(doc);
@@ -454,10 +469,11 @@ export const generateInvoicePDF = (invoice: Invoice, client: Client) => {
     doc.text(`$${(invoice.total || 0).toFixed(2)}`, valX, finalY + 26.5, { align: 'right' });
 
     addFooter(doc, 1);
-    doc.save(`${invoice.type}_${invoice.id}.pdf`);
+    return finalizePdf(doc, `${invoice.type}_${invoice.id}.pdf`, options);
   } catch (error) {
     console.error("PDF Generation Error:", error);
-    alert("Failed to generate PDF. Please check console for details.");
+    if (!options?.asBase64) alert("Failed to generate PDF. Please check console for details.");
+    return;
   }
 };
 
@@ -645,7 +661,7 @@ export const generateContractsReportPDF = (contracts: Contract[], getClientName:
     }
 };
 
-export const generateContractPDF = (contract: Contract, client: Client, billboardName: string) => {
+export const generateContractPDF = (contract: Contract, client: Client, billboardName: string, options?: PdfOutputOptions): PdfBase64 | void => {
   try {
     const doc = new jsPDF();
     let currentY = addCompanyHeader(doc);
@@ -762,14 +778,15 @@ export const generateContractPDF = (contract: Contract, client: Client, billboar
     doc.text("Signed for Lessee", 110, currentY + 5);
 
     addFooter(doc, 1);
-    doc.save(`Contract_${contract.id}.pdf`);
+    return finalizePdf(doc, `Contract_${contract.id}.pdf`, options);
   } catch (error) {
     console.error("PDF Generation Error:", error);
-    alert("Failed to generate Contract PDF.");
+    if (!options?.asBase64) alert("Failed to generate Contract PDF.");
+    return;
   }
 };
 
-export const generateStatementPDF = (client: Client, transactions: Invoice[], activeRentals: Contract[], billboardNameGetter: (id: string) => string) => {
+export const generateStatementPDF = (client: Client, transactions: Invoice[], activeRentals: Contract[], billboardNameGetter: (id: string) => string, options?: PdfOutputOptions): PdfBase64 | void => {
     try {
         const doc = new jsPDF();
         let currentY = addCompanyHeader(doc);
@@ -873,10 +890,11 @@ export const generateStatementPDF = (client: Client, transactions: Invoice[], ac
         });
 
         addFooter(doc, 1);
-        doc.save(`Statement_${client.companyName.replace(/\s/g, '_')}.pdf`);
+        return finalizePdf(doc, `Statement_${client.companyName.replace(/\s/g, '_')}.pdf`, options);
     } catch (error) {
         console.error("PDF Generation Error:", error);
-        alert("Failed to generate Statement PDF.");
+        if (!options?.asBase64) alert("Failed to generate Statement PDF.");
+        return;
     }
 };
 
@@ -1019,7 +1037,7 @@ export const generateFeaturesPDF = () => {
             ["Category", "Technology Used"],
             ["Frontend Framework", "React 18 + TypeScript + Vite"],
             ["Styling System", "Tailwind CSS (Utility-first)"],
-            ["State & Storage", "Local Persistence + Supabase Sync"],
+            ["State & Storage", "Local Persistence + Neon Sync"],
             ["Mapping Engine", "Leaflet JS + OpenStreetMap"],
             ["Reporting Engine", "jsPDF + AutoTable"],
             ["AI Integration", "Google Gemini 2.5 Flash API"],

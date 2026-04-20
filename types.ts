@@ -143,8 +143,10 @@ export interface User {
   lastName: string;
   role: 'Admin' | 'Manager' | 'Staff';
   email: string;
-  password?: string; // Added for Auth
-  status?: 'Active' | 'Pending' | 'Denied'; // Added for Approval Workflow
+  /** @deprecated Passwords are stored server-side only. Never set from the client. */
+  password?: string;
+  status?: 'Active' | 'Pending' | 'Denied'; // Approval Workflow
+  mustChangePassword?: boolean; // True after invite / admin-reset; cleared on change
 }
 
 export interface AuditLogEntry {

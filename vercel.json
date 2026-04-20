@@ -5,9 +5,12 @@
   "framework": "vite",
   "outputDirectory": "dist",
   "rewrites": [
-    {
-      "source": "/(.*)",
-      "destination": "/index.html"
-    }
+    { "source": "/health", "destination": "/api/server" },
+    { "source": "/health/(.*)", "destination": "/api/server" },
+    { "source": "/sync", "destination": "/api/server" },
+    { "source": "/sync/(.*)", "destination": "/api/server" },
+    { "source": "/delete/(.*)", "destination": "/api/server" },
+    { "source": "/force-push", "destination": "/api/server" },
+    { "source": "/((?!api/|assets/).*)", "destination": "/index.html" }
   ]
 }

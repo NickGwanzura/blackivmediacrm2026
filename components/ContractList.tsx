@@ -1,13 +1,17 @@
 
 import React, { useState, useEffect } from 'react';
 import { mockContracts, mockClients, mockBillboards, getContracts } from '../services/mockData';
+import { useToast } from './Toast';
 import { generateContractPDF, generateContractsReportPDF } from '../services/pdfGenerator';
+import { emailContract } from '../services/emailService';
 import { Contract } from '../types';
-import { FileText, Calendar, CheckCircle, AlertCircle, Printer, Wrench, Download, X, Eye, Clock, Plus as PlusIcon, FileDown } from 'lucide-react';
+import { FileText, Calendar, CheckCircle, AlertCircle, Printer, Wrench, Download, X, Eye, Clock, Plus as PlusIcon, FileDown, Mail, Loader2 } from 'lucide-react';
 
 export const ContractList: React.FC = () => {
+  const toast = useToast();
   const [selectedContract, setSelectedContract] = useState<Contract | null>(null);
   const [contracts, setContracts] = useState<Contract[]>(mockContracts);
+  const [emailingContractId, setEmailingContractId] = useState<string | null>(null);
 
   // Poll for updates every 2 seconds to ensure list is in sync if added from another tab or component
   useEffect(() => {
@@ -27,6 +31,16 @@ export const ContractList: React.FC = () => {
   const handleDownload = (contract: Contract) => {
       const client = getClient(contract.clientId);
       if (client) { generateContractPDF(contract, client, getBillboardName(contract.billboardId)); }
+  };
+
+  const handleEmail = async (contract: Contract) => {
+      const client = getClient(contract.clientId);
+      if (!client) { toast.error('Client not found for this contract.'); return; }
+      if (!client.email) { toast.warning(`No email address on file for ${client.companyName}.`); return; }
+      setEmailingContractId(contract.id);
+      const result = await emailContract(contract, client, getBillboardName(contract.billboardId));
+      setEmailingContractId(null);
+      if (result.success) { toast.success(`Contract emailed to ${client.email}.`); } else { toast.error(`Email failed: ${result.message}`); }
   };
   
   const handleDownloadReport = () => {
@@ -78,7 +92,7 @@ export const ContractList: React.FC = () => {
             <div key={contract.id} className="bg-white rounded-2xl p-6 border border-slate-100 shadow-sm hover:shadow-xl transition-all flex flex-col md:flex-row items-start md:items-center justify-between gap-6 group">
               <div className="flex items-start gap-5"><div className="p-4 bg-indigo-50 rounded-2xl group-hover:bg-indigo-600 transition-colors group-hover:text-white text-indigo-600"><FileText className="w-6 h-6" /></div><div><h3 className="font-bold text-slate-900 text-lg">{getClientName(contract.clientId)}</h3><div className="flex items-center gap-2 text-sm text-slate-500 mt-1"><span className="font-medium text-slate-700">{getBillboardName(contract.billboardId)}</span><span className="text-slate-300">•</span><span className={`font-bold px-2 py-0.5 rounded text-xs ${contract.side === 'A' || contract.side === 'B' ? 'bg-blue-50 text-blue-700' : 'bg-purple-50 text-purple-700'}`}>{contract.details}</span></div><div className="flex items-center gap-3 mt-3 text-xs text-slate-400 uppercase tracking-wide font-medium flex-wrap"><span className="flex items-center gap-1"><Calendar size={12} /> {contract.startDate} — {contract.endDate}</span><span className="flex items-center gap-1 text-emerald-700 bg-emerald-50 px-2 py-1 rounded-md border border-emerald-100 shadow-sm" title="Monthly Billing Cycle"><Clock size={12} /> Bill Day: {getBillingDayDisplay(contract)}</span><span>ID: {contract.id}</span></div></div></div>
               <div className="flex flex-col md:items-end gap-1 w-full md:w-auto pl-16 md:pl-0"><div className="flex items-center gap-2"><span className="text-sm text-slate-400 font-medium">Total Value:</span><span className="text-2xl font-bold text-slate-900 tracking-tight">${contract.totalContractValue.toLocaleString()}</span></div><div className="flex gap-2 text-[10px] text-slate-500 uppercase tracking-wide">{contract.monthlyRate > 0 && <span>${contract.monthlyRate}/mo</span>}{contract.installationCost > 0 && <span className="flex items-center gap-1 text-slate-400">+ Install</span>}{contract.printingCost > 0 && <span className="flex items-center gap-1 text-slate-400">+ Print</span>}{contract.hasVat && <span className="text-slate-400">+ VAT</span>}</div></div>
-              <div className="flex gap-3 w-full md:w-auto border-t md:border-t-0 border-slate-100 pt-5 md:pt-0 mt-2 md:mt-0 pl-16 md:pl-0"><button onClick={() => setSelectedContract(contract)} className="px-4 py-2 text-xs font-bold uppercase tracking-wider text-slate-500 hover:text-slate-900 hover:bg-slate-50 rounded-lg transition-colors flex items-center gap-2"><Eye size={14} /> View</button><button onClick={() => handleDownload(contract)} className="px-4 py-2 text-xs font-bold uppercase tracking-wider text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors flex items-center gap-2 shadow-lg hover:shadow-slate-500/30"><Download size={14} /> PDF</button></div>
+              <div className="flex gap-3 w-full md:w-auto border-t md:border-t-0 border-slate-100 pt-5 md:pt-0 mt-2 md:mt-0 pl-16 md:pl-0"><button onClick={() => setSelectedContract(contract)} className="px-4 py-2 text-xs font-bold uppercase tracking-wider text-slate-500 hover:text-slate-900 hover:bg-slate-50 rounded-lg transition-colors flex items-center gap-2"><Eye size={14} /> View</button><button onClick={() => handleDownload(contract)} className="px-4 py-2 text-xs font-bold uppercase tracking-wider text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors flex items-center gap-2 shadow-lg hover:shadow-slate-500/30"><Download size={14} /> PDF</button><button onClick={() => handleEmail(contract)} disabled={emailingContractId === contract.id} title={getClient(contract.clientId)?.email ? `Email to ${getClient(contract.clientId)?.email}` : 'No client email on file'} className="px-4 py-2 text-xs font-bold uppercase tracking-wider text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors flex items-center gap-2 disabled:opacity-50">{emailingContractId === contract.id ? <Loader2 size={14} className="animate-spin" /> : <Mail size={14} />} Email</button></div>
             </div>
           ))}
         </div>

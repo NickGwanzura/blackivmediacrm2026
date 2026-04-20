@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { getInvoices, getContracts, mockClients, getBillboards, addInvoice, markInvoiceAsPaid } from '../services/mockData';
+import { useToast } from './Toast';
 import { generateInvoicePDF } from '../services/pdfGenerator';
 import { FileText, Download, Printer, Plus, X, Save, Link2, CreditCard, Search, ChevronRight, Wrench, Palette } from 'lucide-react';
 import { Invoice, VAT_RATE } from '../types';
@@ -23,6 +24,7 @@ const MinimalSelect = ({ label, value, onChange, options }: any) => (
 interface FinancialsProps { initialTab?: 'Invoices' | 'Quotations' | 'Receipts'; }
 
 export const Financials: React.FC<FinancialsProps> = ({ initialTab = 'Invoices' }) => {
+  const toast = useToast();
   const [activeTab, setActiveTab] = useState<'Invoices' | 'Quotations' | 'Receipts'>(initialTab);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [invoices, setInvoices] = useState<Invoice[]>(getInvoices());
@@ -96,14 +98,14 @@ export const Financials: React.FC<FinancialsProps> = ({ initialTab = 'Invoices' 
       addInvoice(newDoc);
       if (activeTab === 'Receipts' && selectedInvoiceToPay) { markInvoiceAsPaid(selectedInvoiceToPay); }
       
-      setInvoices(getInvoices()); 
-      setIsModalOpen(false); 
-      setFormData({ clientId: '', items: [], date: new Date().toISOString().split('T')[0], status: 'Pending', contractId: '', paymentMethod: 'Bank Transfer', paymentReference: '', installCost: 0, printCost: 0 }); 
-      setSelectedInvoiceToPay(''); 
-      alert(`${activeTab.slice(0, -1)} Created Successfully!`);
+      setInvoices(getInvoices());
+      setIsModalOpen(false);
+      setFormData({ clientId: '', items: [], date: new Date().toISOString().split('T')[0], status: 'Pending', contractId: '', paymentMethod: 'Bank Transfer', paymentReference: '', installCost: 0, printCost: 0 });
+      setSelectedInvoiceToPay('');
+      toast.success(`${activeTab.slice(0, -1)} created successfully.`);
   };
   
-  const downloadPDF = (doc: Invoice) => { const client = mockClients.find(c => c.id === doc.clientId); if (client) { generateInvoicePDF(doc, client); } else { alert(`Could not generate PDF: Client data missing for ID ${doc.clientId}`); } };
+  const downloadPDF = (doc: Invoice) => { const client = mockClients.find(c => c.id === doc.clientId); if (client) { generateInvoicePDF(doc, client); } else { toast.error(`Could not generate PDF: Client data missing for ID ${doc.clientId}`); } };
   const initiatePayment = (invoice: Invoice) => { setActiveTab('Receipts'); setIsModalOpen(true); setTimeout(() => handleInvoiceSelect(invoice.id), 0); };
 
   const filteredDocs = invoices.filter(i => {

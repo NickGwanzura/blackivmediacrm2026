@@ -1,10 +1,12 @@
 
 import React, { useState, useEffect } from 'react';
 import { getContracts, getBillboards, addContract, addInvoice, mockClients, deleteContract } from '../services/mockData';
+import { useToast } from './Toast';
 import { generateContractPDF, generateMasterContractPDF, generateActiveRentalsPDF } from '../services/pdfGenerator';
+import { emailContract } from '../services/emailService';
 import { generateRentalProposal } from '../services/aiService';
 import { Contract, BillboardType, VAT_RATE, Invoice } from '../types';
-import { FileText, Calendar, Download, Eye, Plus, X, Wand2, RefreshCw, CheckCircle, Trash2, AlertTriangle, Sparkles, Layers, ShoppingCart, MinusCircle, FileDown } from 'lucide-react';
+import { FileText, Calendar, Download, Eye, Plus, X, Wand2, RefreshCw, CheckCircle, Trash2, AlertTriangle, Sparkles, Layers, ShoppingCart, MinusCircle, FileDown, Mail, Loader2 } from 'lucide-react';
 
 const MinimalInput = ({ label, value, onChange, type = "text", required = false, disabled = false }: any) => {
   const isDate = type === 'date';
@@ -59,6 +61,7 @@ interface BatchItem {
 }
 
 export const Rentals: React.FC = () => {
+  const toast = useToast();
   const [rentals, setRentals] = useState<Contract[]>(getContracts());
   const [selectedRental, setSelectedRental] = useState<Contract | null>(null);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -70,6 +73,7 @@ export const Rentals: React.FC = () => {
   // Mode State
   const [isBatchMode, setIsBatchMode] = useState(false);
   const [batchItems, setBatchItems] = useState<BatchItem[]>([]);
+  const [emailingContractId, setEmailingContractId] = useState<string | null>(null);
 
   // Shared form state
   const [formData, setFormData] = useState({
@@ -103,6 +107,16 @@ export const Rentals: React.FC = () => {
   const getBillboard = (id: string) => billboards.find(b => b.id === id);
   const getClientName = (id: string) => getClient(id)?.companyName || 'Unknown';
   const getBillboardName = (id: string) => getBillboard(id)?.name || 'Unknown';
+
+  const handleEmailContract = async (contract: Contract) => {
+    const client = getClient(contract.clientId);
+    if (!client) { toast.error('Client not found for this contract.'); return; }
+    if (!client.email) { toast.warning(`No email address on file for ${client.companyName}.`); return; }
+    setEmailingContractId(contract.id);
+    const result = await emailContract(contract, client, getBillboardName(contract.billboardId));
+    setEmailingContractId(null);
+    if (result.success) { toast.success(`Contract emailed to ${client.email}.`); } else { toast.error(`Email failed: ${result.message}`); }
+  };
 
   const selectedBillboard = getBillboard(formData.billboardId);
 
@@ -173,21 +187,21 @@ export const Rentals: React.FC = () => {
 
   const addToBatch = () => {
       if (!selectedBillboard) return;
-      
+
       if (selectedBillboard.type === BillboardType.Static && !isSideAvailable(formData.side)) {
-          alert("Selected side is not available or already in cart.");
+          toast.warning("Selected side is not available or already in cart.");
           return;
       }
 
       // Prevent adding same asset configuration twice
-      const isDuplicate = batchItems.some(item => 
-          item.billboardId === formData.billboardId && 
-          item.side === formData.side && 
+      const isDuplicate = batchItems.some(item =>
+          item.billboardId === formData.billboardId &&
+          item.side === formData.side &&
           item.slotNumber === formData.slotNumber
       );
 
       if (isDuplicate) {
-          alert("This asset configuration is already in your batch cart.");
+          toast.warning("This asset configuration is already in your batch cart.");
           return;
       }
 
@@ -227,9 +241,9 @@ export const Rentals: React.FC = () => {
       setBatchItems(prev => prev.filter(i => i.tempId !== tempId));
   };
 
-  const handleBatchCreate = () => {
-      if(batchItems.length === 0) { alert("Please add at least one asset to the batch."); return; }
-      if(!formData.clientId || !formData.startDate || !formData.endDate) { alert("Please fill in Client and Date fields."); return; }
+  const handleBatchCreate = async () => {
+      if (batchItems.length === 0) { toast.warning("Please add at least one asset to the batch."); return; }
+      if (!formData.clientId || !formData.startDate || !formData.endDate) { toast.warning("Please fill in Client and Date fields."); return; }
 
       const createdContractIds: string[] = [];
       const invoiceItems: { description: string; amount: number }[] = [];
@@ -290,17 +304,19 @@ export const Rentals: React.FC = () => {
       addInvoice(invoice);
       
       // Cleanup & Feedback
+      const batchCount = batchItems.length;
+      const batchClient = getClient(formData.clientId);
       setRentals(getContracts());
-      setBillboards([...getBillboards()]); 
+      setBillboards([...getBillboards()]);
       setIsCreateModalOpen(false);
       resetForm();
-      alert(`Batch Successful!\n• ${batchItems.length} Contracts Created (Tracked individually)\n• 1 Consolidated Invoice Generated`);
+      toast.success(`Batch Successful!\n• ${batchCount} Contracts Created (Tracked individually)\n• 1 Consolidated Invoice Generated`);
 
       // Offer Master Contract PDF
-      const client = getClient(formData.clientId);
-      if (client) {
-          if (confirm("Batch processed. Download Master Agreement PDF containing all assets?")) {
-              generateMasterContractPDF(createdContracts, client, getBillboardName);
+      if (batchClient) {
+          const downloadPdf = await toast.confirm({ message: "Download Master Agreement PDF containing all assets?", title: "Batch Processed", variant: 'default', confirmLabel: 'Download PDF' });
+          if (downloadPdf) {
+              generateMasterContractPDF(createdContracts, batchClient, getBillboardName);
           }
       }
   };
@@ -309,7 +325,7 @@ export const Rentals: React.FC = () => {
     e.preventDefault();
     if (selectedBillboard?.type === BillboardType.Static) {
         if (!isSideAvailable(formData.side)) {
-            alert(`Selected side option (${formData.side}) is no longer available.`);
+            toast.warning(`Selected side option (${formData.side}) is no longer available.`);
             return;
         }
     }
@@ -365,7 +381,7 @@ export const Rentals: React.FC = () => {
     setBillboards([...getBillboards()]);
     setIsCreateModalOpen(false);
     resetForm();
-    alert("Success! Rental Active & Initial Invoice Generated.");
+    toast.success("Rental active & initial invoice generated.");
   };
 
   const resetForm = () => {
@@ -375,7 +391,7 @@ export const Rentals: React.FC = () => {
   };
 
   const handleGenerateProposal = async () => {
-    if (!formData.clientId || !formData.billboardId) { alert("Please select a Client and Billboard first."); return; }
+    if (!formData.clientId || !formData.billboardId) { toast.warning("Please select a Client and Billboard first."); return; }
     setIsGenerating(true);
     const client = getClient(formData.clientId)!;
     const billboard = getBillboard(formData.billboardId)!;
@@ -455,6 +471,9 @@ export const Rentals: React.FC = () => {
                     </button>
                     <button onClick={() => { const client = getClient(contract.clientId); if(client) generateContractPDF(contract, client, getBillboardName(contract.billboardId)); }} className="px-3 py-2 text-[10px] sm:text-xs font-bold uppercase tracking-wider text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors flex items-center gap-1 shadow-lg hover:shadow-slate-500/30">
                         <Download size={14} /> <span className="hidden sm:inline">PDF</span>
+                    </button>
+                    <button onClick={() => handleEmailContract(contract)} disabled={emailingContractId === contract.id} title={(() => { const c = getClient(contract.clientId); return c?.email ? `Email to ${c.email}` : 'No client email on file'; })()} className="px-3 py-2 text-[10px] sm:text-xs font-bold uppercase tracking-wider text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors flex items-center gap-1 disabled:opacity-50">
+                        {emailingContractId === contract.id ? <Loader2 size={14} className="animate-spin" /> : <Mail size={14} />} <span className="hidden sm:inline">Email</span>
                     </button>
                     <button onClick={() => setRentalToDelete(contract)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="Delete Rental">
                         <Trash2 size={16} />

@@ -1,6 +1,7 @@
 
 import React, { useState } from 'react';
 import { getExpenses, addExpense, mockPrintingJobs, getClients } from '../services/mockData';
+import { useToast } from './Toast';
 import { Printer, TrendingDown, Plus, BarChart3, Scissors, Droplets, Zap, User, X, Save, Download } from 'lucide-react';
 import { PrintingJob, Expense } from '../types';
 import { generateCostReportPDF } from '../services/pdfGenerator';
@@ -21,6 +22,7 @@ const MinimalSelect = ({ label, value, onChange, options }: any) => (
 );
 
 export const Expenses: React.FC = () => {
+  const toast = useToast();
   const [activeTab, setActiveTab] = useState<'General' | 'Printing' | 'Reports'>('General');
   const [generalExpenses, setGeneralExpenses] = useState<Expense[]>(getExpenses());
   const [isAddJobModalOpen, setIsAddJobModalOpen] = useState(false);
@@ -29,9 +31,9 @@ export const Expenses: React.FC = () => {
   const [newExpense, setNewExpense] = useState<Partial<Expense>>({ category: 'Maintenance', description: '', amount: 0, date: new Date().toISOString().split('T')[0], reference: '' });
 
   const getClientName = (id: string) => getClients().find(c => c.id === id)?.companyName || 'Unknown';
-  const handleAddJob = (e: React.FormEvent) => { e.preventDefault(); setIsAddJobModalOpen(false); alert("Job Added! (Simulated)"); };
-  const handleAddExpense = (e: React.FormEvent) => { e.preventDefault(); const expense: Expense = { id: `EXP-${Date.now()}`, category: newExpense.category as any, description: newExpense.description || '', amount: newExpense.amount || 0, date: newExpense.date || new Date().toISOString(), reference: newExpense.reference }; addExpense(expense); setGeneralExpenses(getExpenses()); setIsAddExpenseModalOpen(false); setNewExpense({ category: 'Maintenance', description: '', amount: 0, date: new Date().toISOString().split('T')[0], reference: '' }); };
-  const exportExpenseReport = () => { const clients = getClients(); const csvRows = clients.map(client => { const jobs = mockPrintingJobs.filter(j => j.clientId === client.id); if (jobs.length === 0) return null; const totalSpent = jobs.reduce((acc, curr) => acc + curr.chargedAmount, 0); const totalCost = jobs.reduce((acc, curr) => acc + curr.totalCost, 0); const profit = totalSpent - totalCost; const margin = totalSpent > 0 ? ((profit / totalSpent) * 100).toFixed(2) : '0'; return `"${client.companyName}",${jobs.length},${totalSpent},${totalCost},${profit},${margin}`; }).filter(row => row !== null).join("\n"); if (!csvRows) { alert("No data to export."); return; } const blob = new Blob(["Client,Total Jobs,Total Billed,Total Internal Cost,Net Profit,Margin %\n" + csvRows], { type: 'text/csv;charset=utf-8;' }); const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.setAttribute('download', `printing_expenses_report_${new Date().toISOString().slice(0,10)}.csv`); document.body.appendChild(link); link.click(); document.body.removeChild(link); };
+  const handleAddJob = (e: React.FormEvent) => { e.preventDefault(); setIsAddJobModalOpen(false); toast.success("Job added successfully."); };
+  const handleAddExpense = (e: React.FormEvent) => { e.preventDefault(); const expense: Expense = { id: `EXP-${Date.now()}`, category: newExpense.category as any, description: newExpense.description || '', amount: newExpense.amount || 0, date: newExpense.date || new Date().toISOString(), reference: newExpense.reference }; addExpense(expense); setGeneralExpenses(getExpenses()); setIsAddExpenseModalOpen(false); setNewExpense({ category: 'Maintenance', description: '', amount: 0, date: new Date().toISOString().split('T')[0], reference: '' }); toast.success("Expense recorded."); };
+  const exportExpenseReport = () => { const clients = getClients(); const csvRows = clients.map(client => { const jobs = mockPrintingJobs.filter(j => j.clientId === client.id); if (jobs.length === 0) return null; const totalSpent = jobs.reduce((acc, curr) => acc + curr.chargedAmount, 0); const totalCost = jobs.reduce((acc, curr) => acc + curr.totalCost, 0); const profit = totalSpent - totalCost; const margin = totalSpent > 0 ? ((profit / totalSpent) * 100).toFixed(2) : '0'; return `"${client.companyName}",${jobs.length},${totalSpent},${totalCost},${profit},${margin}`; }).filter(row => row !== null).join("\n"); if (!csvRows) { toast.info("No data to export."); return; } const blob = new Blob(["Client,Total Jobs,Total Billed,Total Internal Cost,Net Profit,Margin %\n" + csvRows], { type: 'text/csv;charset=utf-8;' }); const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.setAttribute('download', `printing_expenses_report_${new Date().toISOString().slice(0,10)}.csv`); document.body.appendChild(link); link.click(); document.body.removeChild(link); toast.success("Report exported."); };
   const calculateTotalJobCost = () => { return (newJob.pvcCost || 0) + (newJob.inkCost || 0) + (newJob.electricityCost || 0) + (newJob.operatorCost || 0) + (newJob.weldingCost || 0); };
   const exportPdfReport = () => { generateCostReportPDF(getClients(), mockPrintingJobs, generalExpenses); };
 

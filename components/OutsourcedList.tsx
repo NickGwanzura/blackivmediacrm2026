@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { getOutsourcedBillboards, getBillboards, addOutsourcedBillboard, updateOutsourcedBillboard, deleteOutsourcedBillboard } from '../services/mockData';
+import { useToast } from './Toast';
 import { OutsourcedBillboard, Billboard } from '../types';
 import { Plus, X, Edit2, Globe, DollarSign, Calendar, Save, Trash2, AlertTriangle, MapPin } from 'lucide-react';
 
@@ -30,6 +31,7 @@ const MinimalInput = ({ label, value, onChange, type = "text", required = false 
 );
 
 export const OutsourcedList: React.FC = () => {
+  const toast = useToast();
   const [outsourcedList, setOutsourcedList] = useState<OutsourcedBillboard[]>(getOutsourcedBillboards());
   const [inventory, setInventory] = useState<Billboard[]>(getBillboards());
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -47,41 +49,44 @@ export const OutsourcedList: React.FC = () => {
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!currentBillboard.billboardId) {
-        alert("Please select a billboard from the inventory.");
+        toast.warning("Please select a billboard from the inventory.");
         return;
     }
 
     const linkedBillboard = inventory.find(b => b.id === currentBillboard.billboardId);
-    
-    if (currentBillboard.id) { 
-        const updated = { 
-            ...currentBillboard, 
-            billboardName: linkedBillboard?.name || 'Unknown' 
-        } as OutsourcedBillboard; 
-        updateOutsourcedBillboard(updated); 
+
+    if (currentBillboard.id) {
+        const updated = {
+            ...currentBillboard,
+            billboardName: linkedBillboard?.name || 'Unknown'
+        } as OutsourcedBillboard;
+        updateOutsourcedBillboard(updated);
         setOutsourcedList(getOutsourcedBillboards());
-    } else { 
-        const newB: OutsourcedBillboard = { 
-            ...currentBillboard, 
-            id: `OUT-${Date.now()}`, 
-            billboardName: linkedBillboard?.name || 'Unknown', 
-            status: 'Active' 
-        } as OutsourcedBillboard; 
-        addOutsourcedBillboard(newB); 
+        toast.success("Outsourced assignment updated.");
+    } else {
+        const newB: OutsourcedBillboard = {
+            ...currentBillboard,
+            id: `OUT-${Date.now()}`,
+            billboardName: linkedBillboard?.name || 'Unknown',
+            status: 'Active'
+        } as OutsourcedBillboard;
+        addOutsourcedBillboard(newB);
         setOutsourcedList(getOutsourcedBillboards());
+        toast.success(`${linkedBillboard?.name || 'Billboard'} assigned to partner.`);
     }
-    setIsModalOpen(false); 
+    setIsModalOpen(false);
     setCurrentBillboard({});
   };
 
-  const handleDeleteConfirm = () => { 
-      if(itemToDelete) { 
-          deleteOutsourcedBillboard(itemToDelete.id); 
+  const handleDeleteConfirm = () => {
+      if (itemToDelete) {
+          deleteOutsourcedBillboard(itemToDelete.id);
           setOutsourcedList(getOutsourcedBillboards());
-          setItemToDelete(null); 
-      } 
+          toast.success(`${itemToDelete.billboardName} assignment removed.`);
+          setItemToDelete(null);
+      }
   };
 
   const openAdd = () => { 

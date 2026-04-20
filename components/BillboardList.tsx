@@ -5,6 +5,7 @@ import { getBillboards, addBillboard, updateBillboard, deleteBillboard, mockClie
 import { estimateLocationDetails } from '../services/aiService';
 import { MapPin, X, Edit2, Save, Plus, Image as ImageIcon, Map as MapIcon, Grid as GridIcon, Trash2, AlertTriangle, Share2, Eye, EyeOff, Copy, List as ListIcon, Search, Link2, FileUp, FileDown, Sparkles, Loader2, Filter, Check, MoreHorizontal, RefreshCw } from 'lucide-react';
 import L from 'leaflet';
+import { useToast } from './Toast';
 
 const MinimalInput = ({ label, value, onChange, type = "text", required = false }: any) => (
   <div className="group relative">
@@ -114,6 +115,7 @@ const BillboardCard: React.FC<BillboardCardProps> = ({ billboard, onEdit, onDele
 );
 
 export const BillboardList: React.FC = () => {
+  const toast = useToast();
   const [billboards, setBillboards] = useState<Billboard[]>(getBillboards());
   const [filter, setFilter] = useState<'All' | 'Static' | 'LED'>('All');
   const [townFilter, setTownFilter] = useState('All');
@@ -188,17 +190,20 @@ export const BillboardList: React.FC = () => {
   };
 
   // Batch Logic
-  const handleBatchDelete = () => {
-      if (!confirm(`Are you sure you want to delete ${selectedIds.length} assets? This cannot be undone.`)) return;
-      
+  const handleBatchDelete = async () => {
+      const ok = await toast.confirm({ message: `Are you sure you want to delete ${selectedIds.length} assets? This cannot be undone.`, variant: 'danger', confirmLabel: 'Delete All' });
+      if (!ok) return;
+
       selectedIds.forEach(id => deleteBillboard(id));
       setBillboards([...getBillboards()]);
       setSelectedIds([]);
+      toast.success(`${selectedIds.length} assets deleted.`);
   };
 
-  const handleBatchResetStatus = () => {
-      if (!confirm(`Reset status to 'Available' for ${selectedIds.length} assets?`)) return;
-      
+  const handleBatchResetStatus = async () => {
+      const ok = await toast.confirm({ message: `Reset status to 'Available' for ${selectedIds.length} assets?`, variant: 'default', confirmLabel: 'Reset' });
+      if (!ok) return;
+
       const updates = billboards
           .filter(b => selectedIds.includes(b.id))
           .map(b => ({
@@ -209,27 +214,27 @@ export const BillboardList: React.FC = () => {
               sideBClientId: undefined,
               rentedSlots: 0
           }));
-      
+
       bulkUpdateBillboards(updates);
       setBillboards([...getBillboards()]);
       setSelectedIds([]);
-      alert("Statuses reset successfully.");
+      toast.success("Statuses reset successfully.");
   };
 
   const handleBatchEditTown = (e: React.FormEvent) => {
       e.preventDefault();
       if (!batchEditValue) return;
-      
+
       const updates = billboards
           .filter(b => selectedIds.includes(b.id))
           .map(b => ({ ...b, town: batchEditValue }));
-      
+
       bulkUpdateBillboards(updates);
       setBillboards([...getBillboards()]);
       setSelectedIds([]);
       setBatchEditType(null);
       setBatchEditValue('');
-      alert("Locations updated successfully.");
+      toast.success("Locations updated successfully.");
   };
 
   useEffect(() => {
@@ -268,10 +273,10 @@ export const BillboardList: React.FC = () => {
 
   const handleSaveEdit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (editingBillboard) { updateBillboard(editingBillboard); setBillboards([...getBillboards()]); setEditingBillboard(null); }
+    if (editingBillboard) { updateBillboard(editingBillboard); setBillboards([...getBillboards()]); setEditingBillboard(null); toast.success("Asset updated successfully."); }
   };
   const handleConfirmDelete = () => {
-      if (billboardToDelete) { deleteBillboard(billboardToDelete.id); setBillboards([...getBillboards()]); setBillboardToDelete(null); }
+      if (billboardToDelete) { deleteBillboard(billboardToDelete.id); setBillboards([...getBillboards()]); setBillboardToDelete(null); toast.success("Asset deleted."); }
   };
   const handleAddBillboard = (e: React.FormEvent) => {
     e.preventDefault();
@@ -294,12 +299,13 @@ export const BillboardList: React.FC = () => {
       visibility: newBillboard.visibility, 
       coordinates: newBillboard.coordinates || { lat: -17.82, lng: 31.05 }
     };
-    addBillboard(billboard); 
-    setBillboards([...getBillboards()]); 
+    addBillboard(billboard);
+    setBillboards([...getBillboards()]);
     setIsAddModalOpen(false);
-    setNewBillboard({ 
-      name: '', location: '', town: 'Harare', type: BillboardType.Static, 
-      width: 0, height: 0, sideARate: 0, sideBRate: 0, ratePerSlot: 0, 
+    toast.success(`${billboard.name} added to inventory.`);
+    setNewBillboard({
+      name: '', location: '', town: 'Harare', type: BillboardType.Static,
+      width: 0, height: 0, sideARate: 0, sideBRate: 0, ratePerSlot: 0,
       totalSlots: 10, imageUrl: '', visibility: '', coordinates: { lat: -17.8292, lng: 31.0522 },
       sideAStatus: 'Available', sideBStatus: 'Available', rentedSlots: 0
     });
@@ -317,23 +323,23 @@ export const BillboardList: React.FC = () => {
   };
   const getClientName = (clientId?: string) => { if(!clientId) return 'Available'; return mockClients.find(c => c.id === clientId)?.companyName || 'Unknown'; };
   
-  const shareBillboard = (b: Billboard) => { 
+  const shareBillboard = (b: Billboard) => {
       const url = `${window.location.origin}${window.location.pathname}?billboardId=${b.id}`;
-      navigator.clipboard.writeText(url); 
-      alert("Link copied to clipboard!"); 
+      navigator.clipboard.writeText(url);
+      toast.success("Link copied to clipboard!");
   };
   
-  const copyMapLink = () => { 
+  const copyMapLink = () => {
       const url = `${window.location.origin}${window.location.pathname}?view=map`;
-      navigator.clipboard.writeText(url); 
-      setIsMapShareModalOpen(false); 
-      alert("Map link copied!"); 
+      navigator.clipboard.writeText(url);
+      setIsMapShareModalOpen(false);
+      toast.success("Map link copied!");
   };
 
   const handleAiAutofill = async (isEdit: boolean) => {
     const target = isEdit ? editingBillboard : newBillboard;
     if (!target?.location || !target?.town) {
-        alert("Please enter a Location and Town first.");
+        toast.warning("Please enter a Location and Town first.");
         return;
     }
     
@@ -479,10 +485,10 @@ export const BillboardList: React.FC = () => {
               if (newContractsToAdd.length > 0) await bulkAddContracts(newContractsToAdd);
 
               setBillboards([...getBillboards()]);
-              alert(`Import Successful!\n• ${newBoardsToAdd.length} Billboards added.\n• ${newContractsToAdd.length} Contracts created & linked.\n\nSync to cloud completed.`);
+              toast.success(`Import Successful!\n• ${newBoardsToAdd.length} Billboards added.\n• ${newContractsToAdd.length} Contracts created & linked.\n\nSync to cloud completed.`);
           } catch (error) {
               console.error("Import Error:", error);
-              alert("An error occurred during import. Please check the file format and try again.");
+              toast.error("An error occurred during import. Please check the file format and try again.");
           } finally {
               setIsImporting(false);
               if (importInputRef.current) importInputRef.current.value = '';

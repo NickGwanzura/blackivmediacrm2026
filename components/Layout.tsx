@@ -1,6 +1,10 @@
+// TODO(auth-follow-up): Staff role should get destructive buttons (Add/Edit/
+// Delete) hidden across Rentals/ClientList/BillboardList/Payments/Expenses/
+// Maintenance. This pass only gates the Settings module; wider gating will
+// follow once the role helpers here are in use.
 
 import React, { useState, useEffect, useRef } from 'react';
-import { 
+import {
   LayoutDashboard, Map, Users, FileText, CreditCard, Receipt, Settings as SettingsIcon,
   Menu, X, Bell, LogOut, Printer, Globe, PieChart, Wallet, ChevronRight, Wrench, AlertTriangle, Calendar, AlertCircle, RefreshCw
 } from 'lucide-react';
@@ -80,6 +84,8 @@ export const Layout: React.FC<LayoutProps> = ({ children, currentPage, onNavigat
     };
   }, [currentPage]);
 
+  const isAdmin = user?.role === 'Admin';
+
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'analytics', label: 'Profit & Analytics', icon: PieChart },
@@ -92,10 +98,12 @@ export const Layout: React.FC<LayoutProps> = ({ children, currentPage, onNavigat
     { id: 'financials', label: 'Invoices & Quotes', icon: CreditCard },
     { id: 'receipts', label: 'Receipts', icon: Receipt },
     { id: 'expenses', label: 'Expenses', icon: Printer },
-    { id: 'settings', label: 'Settings', icon: SettingsIcon },
+    // Settings is Admin-only — the server enforces this too, but hide it from
+    // the sidebar for non-Admins so they don't get a blank page.
+    ...(isAdmin ? [{ id: 'settings', label: 'Settings', icon: SettingsIcon }] : []),
   ];
 
-  const handleLogout = () => { logout(); onLogout(); };
+  const handleLogout = async () => { await logout(); onLogout(); };
 
   // Get data for notifications
   const expiringContracts = getExpiringContracts();

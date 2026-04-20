@@ -1,26 +1,38 @@
 
-import React, { useState } from 'react';
-import { login, register, resetPassword } from '../services/authService';
+import React, { useEffect, useState } from 'react';
+import { login, register, requestPasswordReset, confirmPasswordReset } from '../services/authService';
 import { RELEASE_NOTES } from '../services/mockData';
-import { User, Lock, Mail, ArrowRight, Loader2, ArrowLeft, CheckCircle, Send, ShieldAlert } from 'lucide-react';
+import { User, Lock, Mail, ArrowRight, Loader2, ArrowLeft, Send, ShieldAlert, CheckCircle } from 'lucide-react';
 
 interface AuthProps {
     onLogin: () => void;
 }
 
-type AuthMode = 'login' | 'register' | 'forgot' | 'verify_email' | 'email_sent' | 'pending_approval';
+type AuthMode = 'login' | 'register' | 'forgot' | 'verify_email' | 'email_sent' | 'pending_approval' | 'reset_confirm' | 'reset_success';
 
 export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
     const [mode, setMode] = useState<AuthMode>('login');
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState('');
     const [successMessage, setSuccessMessage] = useState('');
-    
+
     // Form State
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
+    const [newPassword, setNewPassword] = useState('');
     const [firstName, setFirstName] = useState('');
     const [lastName, setLastName] = useState('');
+    const [resetToken, setResetToken] = useState<string | null>(null);
+
+    // Detect ?reset=<token> on mount and switch into the reset-confirm flow.
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        const token = params.get('reset');
+        if (token) {
+            setResetToken(token);
+            setMode('reset_confirm');
+        }
+    }, []);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -31,23 +43,32 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
         try {
             if (mode === 'login') {
                 const user = await login(email, password);
-                if (user) {
-                    onLogin();
-                } else {
-                    // Should be caught by catch block if error thrown from authService
-                    setError('Invalid username or password');
-                }
+                if (user) onLogin();
             } else if (mode === 'register') {
-                if(!firstName || !lastName) {
-                    setError("Please fill in all fields");
+                if (!firstName || !lastName) {
+                    setError('Please fill in all fields');
                     setIsLoading(false);
                     return;
                 }
                 await register(firstName, lastName, email, password);
-                setMode('pending_approval'); // Transition to approval pending screen
+                setMode('pending_approval');
             } else if (mode === 'forgot') {
-                await resetPassword(email);
-                setMode('email_sent'); // Transition to sent screen
+                await requestPasswordReset(email);
+                setMode('email_sent');
+            } else if (mode === 'reset_confirm') {
+                if (!resetToken) {
+                    setError('Missing reset token');
+                    setIsLoading(false);
+                    return;
+                }
+                await confirmPasswordReset(resetToken, newPassword);
+                setMode('reset_success');
+                // Clean up URL so refresh doesn't re-enter reset flow.
+                try {
+                    const url = new URL(window.location.href);
+                    url.searchParams.delete('reset');
+                    window.history.replaceState({}, document.title, url.toString());
+                } catch { /* ignore */ }
             }
         } catch (err: any) {
             setError(err.message || 'An error occurred');
@@ -61,6 +82,7 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
         setError('');
         setSuccessMessage('');
         setPassword('');
+        setNewPassword('');
     };
 
     const renderPendingScreen = () => (
@@ -74,7 +96,7 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
                     Your account has been created successfully. However, for security reasons, all new accounts require <span className="font-bold text-slate-700">Administrator Approval</span> before you can log in.
                 </p>
                 <p className="text-slate-500 mt-4 text-sm">
-                    Please contact your system administrator to activate your account.
+                    You'll receive an email once your account is approved.
                 </p>
             </div>
             <div className="pt-4">
@@ -91,7 +113,7 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
             <div>
                 <h2 className="text-2xl font-bold text-slate-900">Check your inbox</h2>
                 <p className="text-slate-500 mt-2 text-sm leading-relaxed">
-                    If an account exists for <span className="font-bold text-slate-700">{email}</span>, we've sent instructions to reset your password.
+                    If an account exists for <span className="font-bold text-slate-700">{email}</span>, we've sent instructions to reset your password. The link expires in one hour.
                 </p>
             </div>
             <div className="pt-4">
@@ -99,6 +121,25 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
             </div>
         </div>
     );
+
+    const renderResetSuccessScreen = () => (
+        <div className="text-center space-y-6 animate-fade-in">
+            <div className="w-16 h-16 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center mx-auto shadow-sm">
+                <CheckCircle size={32} />
+            </div>
+            <div>
+                <h2 className="text-2xl font-bold text-slate-900">Password updated</h2>
+                <p className="text-slate-500 mt-2 text-sm leading-relaxed">
+                    Your password has been changed. You're now signed in.
+                </p>
+            </div>
+            <div className="pt-4">
+                <button onClick={onLogin} className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold uppercase tracking-wider text-xs hover:bg-slate-800 transition-all">Continue</button>
+            </div>
+        </div>
+    );
+
+    const screenMode = mode === 'pending_approval' || mode === 'email_sent' || mode === 'reset_success';
 
     return (
         <div className="min-h-screen w-full flex bg-white font-sans relative">
@@ -117,7 +158,7 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
                         <p className="text-xs text-zinc-600 font-mono mt-1 group-hover:text-zinc-500 transition-colors">v{RELEASE_NOTES[0].version} • {RELEASE_NOTES[0].date}</p>
                     </div>
                 </div>
-                
+
                 {/* Expandable Changelog */}
                 <div className="grid grid-rows-[0fr] group-hover:grid-rows-[1fr] transition-[grid-template-rows] duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]">
                     <div className="overflow-hidden">
@@ -139,7 +180,7 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
             {/* Left Side - Brand Visual */}
             <div className="hidden lg:flex w-1/2 bg-black relative items-center justify-center overflow-hidden">
                 <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-zinc-800/20 via-black to-black opacity-50"></div>
-                
+
                 <div className="relative z-10 flex flex-col items-center">
                     <div className="text-center">
                         <h1 className="text-6xl font-black text-white tracking-tighter mb-6 leading-tight select-none">
@@ -162,16 +203,22 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
                         </h1>
                     </div>
 
-                    {mode === 'pending_approval' ? renderPendingScreen() : mode === 'email_sent' ? renderSentScreen() : (
+                    {mode === 'pending_approval' ? renderPendingScreen() :
+                     mode === 'email_sent' ? renderSentScreen() :
+                     mode === 'reset_success' ? renderResetSuccessScreen() : (
                         <>
                             <div className="text-left mb-10">
                                 <h1 className="text-3xl font-bold text-slate-900 tracking-tight mb-2">
-                                    {mode === 'login' ? 'Welcome back' : mode === 'register' ? 'Create account' : 'Reset Password'}
+                                    {mode === 'login' ? 'Welcome back' :
+                                     mode === 'register' ? 'Create account' :
+                                     mode === 'forgot' ? 'Reset Password' :
+                                     'Set a new password'}
                                 </h1>
                                 <p className="text-slate-500">
                                     {mode === 'login' && 'Enter your credentials to access the dashboard.'}
                                     {mode === 'register' && 'Enter your details to get started.'}
                                     {mode === 'forgot' && 'Enter your email to receive a reset link.'}
+                                    {mode === 'reset_confirm' && 'Enter a new password to complete the reset.'}
                                 </p>
                             </div>
 
@@ -188,8 +235,8 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
                                             <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">First Name</label>
                                             <div className="relative">
                                                 <User className="absolute left-3 top-3.5 text-slate-400" size={18} />
-                                                <input 
-                                                    type="text" 
+                                                <input
+                                                    type="text"
                                                     className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-10 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-black/5 focus:border-black transition-all text-sm font-medium"
                                                     placeholder="John"
                                                     value={firstName}
@@ -201,8 +248,8 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
                                             <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Last Name</label>
                                             <div className="relative">
                                                 <User className="absolute left-3 top-3.5 text-slate-400" size={18} />
-                                                <input 
-                                                    type="text" 
+                                                <input
+                                                    type="text"
                                                     className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-10 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-black/5 focus:border-black transition-all text-sm font-medium"
                                                     placeholder="Doe"
                                                     value={lastName}
@@ -213,30 +260,32 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
                                     </div>
                                 )}
 
-                                <div className="space-y-1.5">
-                                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">
-                                        {mode === 'login' ? 'Username or Email' : 'Email Address'}
-                                    </label>
-                                    <div className="relative">
-                                        <Mail className="absolute left-3 top-3.5 text-slate-400" size={18} />
-                                        <input 
-                                            type={mode === 'login' ? "text" : "email"}
-                                            className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-10 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-black/5 focus:border-black transition-all text-sm font-medium"
-                                            placeholder={mode === 'login' ? "admin" : "name@blackivy.com"}
-                                            value={email}
-                                            onChange={e => setEmail(e.target.value)}
-                                            required
-                                        />
+                                {mode !== 'reset_confirm' && (
+                                    <div className="space-y-1.5">
+                                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">
+                                            Email Address
+                                        </label>
+                                        <div className="relative">
+                                            <Mail className="absolute left-3 top-3.5 text-slate-400" size={18} />
+                                            <input
+                                                type="email"
+                                                className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-10 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-black/5 focus:border-black transition-all text-sm font-medium"
+                                                placeholder="name@blackivy.com"
+                                                value={email}
+                                                onChange={e => setEmail(e.target.value)}
+                                                required
+                                            />
+                                        </div>
                                     </div>
-                                </div>
+                                )}
 
                                 {(mode === 'login' || mode === 'register') && (
                                     <div className="space-y-1.5 animate-fade-in">
                                         <div className="flex justify-between items-center">
                                             <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Password</label>
                                             {mode === 'login' && (
-                                                <button 
-                                                    type="button" 
+                                                <button
+                                                    type="button"
                                                     onClick={() => toggleMode('forgot')}
                                                     className="text-xs text-orange-600 hover:text-orange-700 font-bold transition-colors"
                                                 >
@@ -246,8 +295,8 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
                                         </div>
                                         <div className="relative">
                                             <Lock className="absolute left-3 top-3.5 text-slate-400" size={18} />
-                                            <input 
-                                                type="password" 
+                                            <input
+                                                type="password"
                                                 className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-10 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-black/5 focus:border-black transition-all text-sm font-medium"
                                                 placeholder="••••••••"
                                                 value={password}
@@ -258,40 +307,61 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
                                     </div>
                                 )}
 
-                                <button 
-                                    type="submit" 
+                                {mode === 'reset_confirm' && (
+                                    <div className="space-y-1.5 animate-fade-in">
+                                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">New password</label>
+                                        <div className="relative">
+                                            <Lock className="absolute left-3 top-3.5 text-slate-400" size={18} />
+                                            <input
+                                                type="password"
+                                                className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-10 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-black/5 focus:border-black transition-all text-sm font-medium"
+                                                placeholder="At least 8 chars, 1 uppercase, 1 digit"
+                                                value={newPassword}
+                                                onChange={e => setNewPassword(e.target.value)}
+                                                required
+                                                minLength={8}
+                                            />
+                                        </div>
+                                    </div>
+                                )}
+
+                                <button
+                                    type="submit"
                                     disabled={isLoading}
                                     className="w-full bg-black text-white py-3.5 rounded-xl font-bold uppercase tracking-wider text-sm hover:bg-zinc-900 transition-all transform hover:scale-[1.01] flex items-center justify-center gap-2 mt-6 shadow-xl shadow-black/10"
                                 >
                                     {isLoading ? <Loader2 className="animate-spin" size={18} /> : (
-                                        mode === 'login' ? 'Sign In' : 
-                                        mode === 'register' ? 'Create Account' : 
-                                        'Send Reset Link'
+                                        mode === 'login' ? 'Sign In' :
+                                        mode === 'register' ? 'Create Account' :
+                                        mode === 'forgot' ? 'Send Reset Link' :
+                                        'Set New Password'
                                     )}
                                     {!isLoading && <ArrowRight size={18} />}
                                 </button>
                             </form>
 
-                            <div className="mt-8 pt-6 border-t border-slate-100 flex flex-col items-center gap-4">
-                                {mode === 'forgot' ? (
-                                    <button 
-                                        onClick={() => toggleMode('login')}
-                                        className="text-slate-500 text-sm hover:text-slate-900 font-medium flex items-center justify-center gap-2 mx-auto transition-colors"
-                                    >
-                                        <ArrowLeft size={16} /> Back to Login
-                                    </button>
-                                ) : (
-                                    <p className="text-slate-500 text-sm">
-                                        {mode === 'login' ? "Don't have an account?" : "Already have an account?"}
-                                        <button 
-                                            onClick={() => toggleMode(mode === 'login' ? 'register' : 'login')}
-                                            className="ml-2 text-black font-bold hover:underline focus:outline-none"
+                            {!screenMode && (
+                                <div className="mt-8 pt-6 border-t border-slate-100 flex flex-col items-center gap-4">
+                                    {(mode === 'forgot' || mode === 'reset_confirm') ? (
+                                        <button
+                                            onClick={() => toggleMode('login')}
+                                            className="text-slate-500 text-sm hover:text-slate-900 font-medium flex items-center justify-center gap-2 mx-auto transition-colors"
                                         >
-                                            {mode === 'login' ? 'Register' : 'Login'}
+                                            <ArrowLeft size={16} /> Back to Login
                                         </button>
-                                    </p>
-                                )}
-                            </div>
+                                    ) : (
+                                        <p className="text-slate-500 text-sm">
+                                            {mode === 'login' ? "Don't have an account?" : "Already have an account?"}
+                                            <button
+                                                onClick={() => toggleMode(mode === 'login' ? 'register' : 'login')}
+                                                className="ml-2 text-black font-bold hover:underline focus:outline-none"
+                                            >
+                                                {mode === 'login' ? 'Register' : 'Login'}
+                                            </button>
+                                        </p>
+                                    )}
+                                </div>
+                            )}
                         </>
                     )}
                 </div>

@@ -1,4 +1,5 @@
 import { Billboard, BillboardType, Client, Contract, Invoice, Expense, User, PrintingJob, OutsourcedBillboard, AuditLogEntry, CompanyProfile, VAT_RATE, MaintenanceLog } from '../types';
+import { toast } from '../components/Toast';
 
 export const ZIM_TOWNS = [
   "Harare", "Bulawayo", "Mutare", "Gweru", "Kwekwe", 
@@ -49,18 +50,20 @@ const loadFromStorage = <T>(key: string, defaultValue: T | null): T | null => {
 };
 
 // --- REMOTE SYNC LOGIC ---
-const DEFAULT_API_URL = 'https://bqadyarwfaczqrhnhrbq.supabase.co';
-const DEFAULT_API_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJxYWR5YXJ3ZmFjenFyaG5ocmJxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjUyMTg4MjQsImV4cCI6MjA4MDc5NDgyNH0.9OSgu-cDfuOt04i4md1Nu01CmYTEP_rXwxx9TodeE0s';
+// The API server (in /server) speaks a simple Node-style protocol on the
+// same origin that serves this SPA: empty URL = same origin. Point at a
+// different host only when the API is deployed separately.
+const DEFAULT_API_URL = '';
+const DEFAULT_API_KEY = '';
 
-let remoteApiUrl = localStorage.getItem(STORAGE_KEYS.API_URL) || DEFAULT_API_URL;
-let remoteApiKey = localStorage.getItem(STORAGE_KEYS.API_KEY) || DEFAULT_API_KEY;
+let remoteApiUrl = localStorage.getItem(STORAGE_KEYS.API_URL) ?? DEFAULT_API_URL;
+let remoteApiKey = localStorage.getItem(STORAGE_KEYS.API_KEY) ?? DEFAULT_API_KEY;
 
-// Force defaults into storage if missing OR if they don't match the required production defaults
-// This enforces the "run on Supabase" requirement
-const currentStoredUrl = localStorage.getItem(STORAGE_KEYS.API_URL);
-if (!currentStoredUrl || currentStoredUrl === 'undefined' || currentStoredUrl === '') {
-    localStorage.setItem(STORAGE_KEYS.API_URL, DEFAULT_API_URL);
-    localStorage.setItem(STORAGE_KEYS.API_KEY, DEFAULT_API_KEY);
+// Migrate legacy Supabase URLs left over from older installs — they point
+// at the decommissioned Supabase project and will 404 against the new API.
+if (remoteApiUrl && remoteApiUrl.includes('supabase.co')) {
+    localStorage.removeItem(STORAGE_KEYS.API_URL);
+    localStorage.removeItem(STORAGE_KEYS.API_KEY);
     remoteApiUrl = DEFAULT_API_URL;
     remoteApiKey = DEFAULT_API_KEY;
 }
@@ -76,185 +79,34 @@ export const setApiConfig = (url: string, key: string) => {
 
 export const getApiConfig = () => ({ url: remoteApiUrl, key: remoteApiKey });
 
-// --- Relational Data Mappers ---
-const mapBillboardToRow = (b: Billboard) => ({
-    id: b.id,
-    name: b.name,
-    location: b.location,
-    town: b.town,
-    type: b.type,
-    width: b.width,
-    height: b.height,
-    coordinates: b.coordinates,
-    image_url: b.imageUrl,
-    visibility: b.visibility,
-    side_a_rate: b.sideARate,
-    side_b_rate: b.sideBRate,
-    side_a_status: b.sideAStatus,
-    side_b_status: b.sideBStatus,
-    rate_per_slot: b.ratePerSlot,
-    total_slots: b.totalSlots,
-    rented_slots: b.rentedSlots
-});
-
-const mapClientToRow = (c: Client) => ({
-    id: c.id,
-    company_name: c.companyName,
-    contact_person: c.contactPerson,
-    email: c.email,
-    phone: c.phone,
-    billing_day: c.billingDay,
-    status: c.status
-});
-
-const mapContractToRow = (c: Contract) => ({
-    id: c.id,
-    client_id: c.clientId,
-    billboard_id: c.billboardId,
-    start_date: c.startDate,
-    end_date: c.endDate,
-    monthly_rate: c.monthlyRate,
-    installation_cost: c.installationCost,
-    printing_cost: c.printingCost,
-    total_contract_value: c.totalContractValue,
-    status: c.status,
-    details: c.details,
-    side: c.side,
-    slot_number: c.slotNumber,
-    has_vat: c.hasVat
-});
-
-const mapInvoiceToRow = (i: Invoice) => ({
-    id: i.id,
-    client_id: i.clientId,
-    contract_id: i.contractId || (i.contractIds && i.contractIds.length > 0 ? i.contractIds[0] : null),
-    date: i.date,
-    items: i.items, // JSONB
-    subtotal: i.subtotal,
-    vat_amount: i.vatAmount,
-    total: i.total,
-    status: i.status,
-    type: i.type,
-    payment_method: i.paymentMethod,
-    payment_reference: i.paymentReference
-});
-
-const mapExpenseToRow = (e: Expense) => ({
-    id: e.id,
-    category: e.category,
-    description: e.description,
-    amount: e.amount,
-    date: e.date,
-    reference: e.reference
-});
-
-const mapMaintenanceToRow = (m: MaintenanceLog) => ({
-    id: m.id,
-    billboard_id: m.billboardId,
-    date: m.date,
-    type: m.type,
-    technician: m.technician,
-    notes: m.notes,
-    status: m.status,
-    next_due_date: m.nextDueDate,
-    cost: m.cost
-});
-
-const mapUserToRow = (u: User) => ({
-    id: u.id,
-    first_name: u.firstName,
-    last_name: u.lastName,
-    email: u.email,
-    role: u.role,
-    password: u.password // Note: In production, never store/sync raw passwords. This is for mock/demo consistency.
-});
-
 const pushToRemote = async (key: string, data: any) => {
-    if (!remoteApiUrl) return;
+    const collectionName = key.replace('bi_', '');
+
+    // Never push plaintext passwords over /sync. The auth server strips them
+    // too, but sanitize client-side as defence-in-depth — also prevents any
+    // legacy localStorage copy from leaking into request logs.
+    let payload: any = data;
+    if (key === STORAGE_KEYS.USERS && Array.isArray(data)) {
+        payload = data.map((u: any) => {
+            if (!u || typeof u !== 'object') return u;
+            const { password, ...rest } = u;
+            return rest;
+        });
+    }
+
     try {
-        const isSupabase = remoteApiUrl.includes('supabase.co');
-        const collectionName = key.replace('bi_', '');
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (remoteApiKey) headers['Authorization'] = `Bearer ${remoteApiKey}`;
 
-        if (isSupabase) {
-            // 1. Primary Sync: Key-Value Store (app_data)
-            const endpoint = `${remoteApiUrl}/rest/v1/app_data`;
-            const response = await fetch(endpoint, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'apikey': remoteApiKey,
-                    'Authorization': `Bearer ${remoteApiKey}`,
-                    'Prefer': 'resolution=merge-duplicates' // Upsert logic
-                },
-                body: JSON.stringify({ 
-                    key: collectionName, 
-                    value: data,
-                    updated_at: new Date().toISOString()
-                })
-            });
-            
-            if (!response.ok) {
-                const errText = await response.text();
-                console.error(`Sync Push Failed for ${collectionName} (${response.status}):`, errText);
-            }
-
-            // 2. Secondary Sync: Relational Tables
-            if (Array.isArray(data) && data.length > 0) {
-                let tableEndpoint = '';
-                let rowData: any[] = [];
-
-                if (collectionName === 'billboards') {
-                    tableEndpoint = `${remoteApiUrl}/rest/v1/billboards`;
-                    rowData = data.map(mapBillboardToRow);
-                } else if (collectionName === 'clients') {
-                    tableEndpoint = `${remoteApiUrl}/rest/v1/clients`;
-                    rowData = data.map(mapClientToRow);
-                } else if (collectionName === 'contracts') {
-                    tableEndpoint = `${remoteApiUrl}/rest/v1/contracts`;
-                    rowData = data.map(mapContractToRow);
-                } else if (collectionName === 'invoices') {
-                    tableEndpoint = `${remoteApiUrl}/rest/v1/invoices`;
-                    rowData = data.map(mapInvoiceToRow);
-                } else if (collectionName === 'expenses') {
-                    tableEndpoint = `${remoteApiUrl}/rest/v1/expenses`;
-                    rowData = data.map(mapExpenseToRow);
-                } else if (collectionName === 'maintenance') { 
-                    tableEndpoint = `${remoteApiUrl}/rest/v1/maintenance_logs`;
-                    rowData = data.map(mapMaintenanceToRow);
-                } else if (collectionName === 'users') {
-                    tableEndpoint = `${remoteApiUrl}/rest/v1/users`;
-                    rowData = data.map(mapUserToRow);
-                }
-
-                if (tableEndpoint && rowData.length > 0) {
-                    const relResponse = await fetch(tableEndpoint, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'apikey': remoteApiKey,
-                            'Authorization': `Bearer ${remoteApiKey}`,
-                            'Prefer': 'resolution=merge-duplicates'
-                        },
-                        body: JSON.stringify(rowData)
-                    });
-                    
-                    if (!relResponse.ok) {
-                        console.warn(`Relational Sync Warning for ${collectionName}:`, await relResponse.text());
-                    }
-                }
-            }
-
-        } else {
-            // Legacy Node Server
-            const endpoint = `${remoteApiUrl}/sync`; 
-            await fetch(endpoint, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${remoteApiKey}`
-                },
-                body: JSON.stringify({ collection: collectionName, data })
-            });
+        const response = await fetch(`${remoteApiUrl}/sync`, {
+            method: 'POST',
+            headers,
+            credentials: 'include',
+            body: JSON.stringify({ collection: collectionName, data: payload }),
+        });
+        if (!response.ok) {
+            const errText = await response.text();
+            console.warn(`Sync Push Failed for ${collectionName} (${response.status}):`, errText);
         }
     } catch (e) {
         console.warn(`Failed to push ${key} to remote backend:`, e);
@@ -262,38 +114,21 @@ const pushToRemote = async (key: string, data: any) => {
 };
 
 const deleteFromRemote = async (collectionName: string, id: string) => {
-    if (!remoteApiUrl || !remoteApiUrl.includes('supabase.co')) return;
-    
-    let tableName = '';
-    switch(collectionName) {
-        case 'billboards': tableName = 'billboards'; break;
-        case 'clients': tableName = 'clients'; break;
-        case 'contracts': tableName = 'contracts'; break;
-        case 'invoices': tableName = 'invoices'; break;
-        case 'expenses': tableName = 'expenses'; break;
-        case 'users': tableName = 'users'; break;
-        case 'maintenance': tableName = 'maintenance_logs'; break;
-    }
-
-    if (tableName) {
-        try {
-            await fetch(`${remoteApiUrl}/rest/v1/${tableName}?id=eq.${id}`, {
-                method: 'DELETE',
-                headers: {
-                    'apikey': remoteApiKey,
-                    'Authorization': `Bearer ${remoteApiKey}`
-                }
-            });
-        } catch (e) {
-            console.error(`Delete remote failed for ${tableName} ${id}`, e);
-        }
+    try {
+        const headers: Record<string, string> = {};
+        if (remoteApiKey) headers['Authorization'] = `Bearer ${remoteApiKey}`;
+        await fetch(`${remoteApiUrl}/delete/${encodeURIComponent(collectionName)}/${encodeURIComponent(id)}`, {
+            method: 'DELETE',
+            headers,
+            credentials: 'include',
+        });
+    } catch (e) {
+        console.error(`Delete remote failed for ${collectionName} ${id}`, e);
     }
 };
 
 // EXPORTED FUNCTION TO SEED DATABASE
 export const forcePushToRemote = async (): Promise<{success: boolean, message: string}> => {
-    if (!remoteApiUrl) return { success: false, message: "No Server URL configured" };
-    
     console.log("Starting full push to remote...");
     const collections = [
         { key: STORAGE_KEYS.BILLBOARDS, data: billboards },
@@ -310,81 +145,41 @@ export const forcePushToRemote = async (): Promise<{success: boolean, message: s
     ];
 
     try {
-        // Run sequentially to avoid rate limiting on Supabase free tier
         for (const item of collections) {
             await pushToRemote(item.key, item.data);
         }
-        return { success: true, message: "All local data pushed to Supabase tables and storage successfully." };
+        return { success: true, message: "All local data pushed to Neon successfully." };
     } catch (e: any) {
         return { success: false, message: `Upload failed: ${e.message}` };
     }
 };
 
 export const validateConnection = async (url: string, key: string): Promise<{success: boolean, step: string, message: string}> => {
-    if (!url) return { success: false, step: 'Config', message: "Server URL is missing" };
-    
-    // Remove trailing slash
-    const cleanUrl = url.endsWith('/') ? url.slice(0, -1) : url;
-    const isSupabase = cleanUrl.includes('supabase.co');
+    const cleanUrl = (url || '').endsWith('/') ? url.slice(0, -1) : (url || '');
 
-    // 1. Check Reachability
-    try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 5000);
-        
-        // For Supabase, check the project root or health
-        // For custom server, check root
-        const rootRes = await fetch(cleanUrl, { signal: controller.signal });
-        clearTimeout(timeout);
-        
-        if (!rootRes.ok && !isSupabase) throw new Error(`Server returned status ${rootRes.status}`);
-        // Supabase root might return 404 or specific HTML, that's fine, we proceed to auth check
-    } catch (e: any) {
-        if(!isSupabase) return { success: false, step: 'Server Reachability', message: e.message || "Connection timed out" };
-    }
-
-    // 2. Check Database Access / Auth
     try {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 8000);
-        
-        let endpoint = '';
-        let headers: any = {};
 
-        if (isSupabase) {
-            // Check if we can read the app_data table
-            endpoint = `${cleanUrl}/rest/v1/app_data?select=key&limit=1`;
-            headers = {
-                'apikey': key,
-                'Authorization': `Bearer ${key}`
-            };
-        } else {
-            endpoint = `${cleanUrl}/sync/all`;
-            headers = { 'Authorization': `Bearer ${key}` };
-        }
+        const headers: Record<string, string> = {};
+        if (key) headers['Authorization'] = `Bearer ${key}`;
 
-        const syncRes = await fetch(endpoint, { 
-            headers,
-            signal: controller.signal 
-        });
+        const res = await fetch(`${cleanUrl}/health/db`, { headers, credentials: 'include', signal: controller.signal });
         clearTimeout(timeout);
 
-        if (!syncRes.ok) {
-            if (syncRes.status === 401) return { success: false, step: 'Authentication', message: "Invalid API Key or Row Level Security policy preventing access." };
-            if (syncRes.status === 404) return { success: false, step: 'Table Check', message: "Table 'app_data' not found. Please run the SQL Schema in Supabase." };
-            return { success: false, step: 'Database Connection', message: `Status ${syncRes.status}: ${syncRes.statusText}` };
+        if (!res.ok) {
+            if (res.status === 401) return { success: false, step: 'Authentication', message: "Invalid API key." };
+            if (res.status === 503) return { success: false, step: 'Database', message: "API reached, but Neon is unreachable." };
+            return { success: false, step: 'API', message: `Status ${res.status}: ${res.statusText}` };
         }
-        
-        const data = await syncRes.json();
-        
-        return { 
-            success: true, 
-            step: 'Complete', 
-            message: `Integrity Verified: Connected to ${isSupabase ? 'Supabase' : 'Custom Server'}.` 
-        };
 
+        const data = await res.json();
+        if (!data.ok) return { success: false, step: 'Database', message: data.error || 'Neon unreachable' };
+
+        return { success: true, step: 'Complete', message: 'Connected to Neon-backed API.' };
     } catch (e: any) {
-        return { success: false, step: 'Data Read', message: e.message || "Failed to parse database response" };
+        const msg = e.name === 'AbortError' ? 'Connection timed out' : (e.message || 'Unknown error');
+        return { success: false, step: 'Reachability', message: msg };
     }
 };
 
@@ -428,50 +223,20 @@ const mergeCollections = (local: any[], remote: any[]): any[] => {
 };
 
 export const pullFromRemote = async (shouldReload: boolean = false): Promise<{success: boolean, message: string}> => {
-    if (!remoteApiUrl) return { success: false, message: "No Server URL configured" };
-    
-    const isSupabase = remoteApiUrl.includes('supabase.co');
-
     try {
-        // Only log if not automatic polling to avoid console spam
         if (shouldReload) console.log("Attempting to pull data from Backend...");
-        
+
         const controller = new AbortController();
-        // Short timeout for background polling to prevent UI lag
-        const timeoutId = setTimeout(() => controller.abort(), 8000); 
+        const timeoutId = setTimeout(() => controller.abort(), 8000);
 
-        let endpoint = '';
-        let headers: any = {};
+        const headers: Record<string, string> = {};
+        if (remoteApiKey) headers['Authorization'] = `Bearer ${remoteApiKey}`;
 
-        if (isSupabase) {
-            endpoint = `${remoteApiUrl}/rest/v1/app_data?select=key,value`;
-            headers = {
-                'apikey': remoteApiKey,
-                'Authorization': `Bearer ${remoteApiKey}`
-            };
-        } else {
-            endpoint = `${remoteApiUrl}/sync/all`;
-            headers = { 'Authorization': `Bearer ${remoteApiKey}` };
-        }
-
-        const response = await fetch(endpoint, {
-            headers,
-            signal: controller.signal
-        });
+        const response = await fetch(`${remoteApiUrl}/sync/all`, { headers, credentials: 'include', signal: controller.signal });
         clearTimeout(timeoutId);
 
         if (response.ok) {
-            const rawData = await response.json();
-            
-            // Normalize Data: Supabase returns [{key: 'x', value: y}], Custom server returns {x: y}
-            let remoteData: any = {};
-            if (isSupabase && Array.isArray(rawData)) {
-                rawData.forEach((row: any) => {
-                    if(row.key && row.value) remoteData[row.key] = row.value;
-                });
-            } else {
-                remoteData = rawData;
-            }
+            const remoteData: any = await response.json();
 
             // --- SMART MERGE LOGIC ---
             // 1. Billboards
@@ -560,9 +325,6 @@ export const pullFromRemote = async (shouldReload: boolean = false): Promise<{su
             }
             return { success: true, message: "Data synchronized successfully." };
         } else {
-            if (response.status === 404 && isSupabase) {
-                 return { success: false, message: `Error 404: Table 'app_data' not found. Please copy and run the SQL Script in your Supabase SQL Editor.` };
-            }
             return { success: false, message: `Server Error: ${response.status} ${response.statusText}` };
         }
     } catch (e: any) {
@@ -580,7 +342,7 @@ const saveToStorage = (key: string, data: any, sync = true): Promise<void> => {
     } catch (e: any) {
         console.error(`Error saving ${key}`, e);
         if (e.name === 'QuotaExceededError' || e.code === 22) {
-            alert("⚠️ Storage Full! Critical Data Warning. Please Download Backup in Settings immediately.");
+            toast.warning('Storage Full! Critical Data Warning. Please Download Backup in Settings immediately.', 'Storage Critical');
         } else {
             console.warn("Data save failed.");
         }
@@ -711,12 +473,18 @@ export let outsourcedBillboards: OutsourcedBillboard[] = loadFromStorage(STORAGE
 export let printingJobs: PrintingJob[] = loadFromStorage(STORAGE_KEYS.PRINTING, []) || [];
 export let maintenanceLogs: MaintenanceLog[] = loadFromStorage(STORAGE_KEYS.MAINTENANCE, []) || [];
 
-const defaultAdmin: User = { id: '1', firstName: 'Admin', lastName: 'User', role: 'Admin', email: 'admin', password: 'admin123', status: 'Active' };
-export let users: User[] = loadFromStorage(STORAGE_KEYS.USERS, null) || [defaultAdmin];
+// The client-side user store is now a cache hydrated from the server's
+// /sync/all (or /auth/me). It starts empty — no default admin is seeded here
+// because the real admin is created server-side on first boot. See
+// server/auth.js → ensureInitialAdmin.
+export let users: User[] = loadFromStorage(STORAGE_KEYS.USERS, null) || [];
 
-if (!loadFromStorage(STORAGE_KEYS.USERS, null)) {
-    saveToStorage(STORAGE_KEYS.USERS, users, false);
-}
+// --- Current user reference (set by services/authService.ts on login) ---
+// authService imports from this file, so mockData keeps a lazy-set reference
+// instead of doing the reverse import (which would be circular).
+let currentUserRef: User | null = null;
+export const setCurrentUserRef = (u: User | null) => { currentUserRef = u; };
+export const getCurrentUserRef = (): User | null => currentUserRef;
 
 // === SELF-HEALING MECHANISM ===
 const attemptDataRecovery = () => {
@@ -739,9 +507,9 @@ const attemptDataRecovery = () => {
                         contracts = data.contracts || [];
                         invoices = data.invoices || [];
                         expenses = data.expenses || [];
-                        if(users.length <= 1 && data.users && data.users.length > 1) {
-                             users = data.users;
-                        }
+                        // Users are now authoritative on the server. Don't
+                        // restore the local users cache from legacy backups —
+                        // the next /auth/me call will re-hydrate it.
                         outsourcedBillboards = data.outsourcedBillboards || [];
                         maintenanceLogs = data.maintenanceLogs || [];
                         
@@ -750,7 +518,6 @@ const attemptDataRecovery = () => {
                         saveToStorage(STORAGE_KEYS.CONTRACTS, contracts);
                         saveToStorage(STORAGE_KEYS.INVOICES, invoices);
                         saveToStorage(STORAGE_KEYS.EXPENSES, expenses);
-                        saveToStorage(STORAGE_KEYS.USERS, users);
                         saveToStorage(STORAGE_KEYS.MAINTENANCE, maintenanceLogs);
                         saveToStorage(STORAGE_KEYS.OUTSOURCED, outsourcedBillboards);
                         
@@ -780,7 +547,8 @@ const attemptDataRecovery = () => {
 attemptDataRecovery();
 
 export const logAction = (action: string, details: string) => {
-    const log: AuditLogEntry = { id: `log-${Date.now()}`, timestamp: new Date().toLocaleString(), action, details, user: 'Current User' };
+    const who = currentUserRef?.email || 'System';
+    const log: AuditLogEntry = { id: `log-${Date.now()}`, timestamp: new Date().toLocaleString(), action, details, user: who };
     auditLogs = [log, ...auditLogs];
     saveToStorage(STORAGE_KEYS.LOGS, auditLogs);
 };
@@ -822,19 +590,17 @@ export const updateCompanyProfile = (profile: CompanyProfile) => {
 };
 
 if (storedVersion !== currentDataVersion) {
-    const adminIdx = users.findIndex(u => u.id === '1' || u.email === 'admin@blackivy.com' || u.email === 'admin');
-    if (adminIdx !== -1) {
-        if(users[adminIdx].email !== 'admin') users[adminIdx] = { ...users[adminIdx], email: 'admin', password: 'admin123', status: 'Active' };
-        else if(!users[adminIdx].status) users[adminIdx] = { ...users[adminIdx], status: 'Active' };
-    } else {
-        if(users.length === 0) users.unshift(defaultAdmin);
-    }
+    // Purge any legacy plaintext passwords that may linger in the local cache
+    // from pre-auth-rewrite installs. The server is the source of truth now.
+    users = users.map(u => {
+        const { password, ...rest } = u as any;
+        return { ...rest, status: rest.status || 'Active' } as User;
+    });
     const existingProfile = loadFromStorage(STORAGE_KEYS.PROFILE, null) as CompanyProfile | null;
     if (existingProfile && (existingProfile.name.includes("Dreambox") || !existingProfile.name)) {
         updateCompanyProfile(DEFAULT_PROFILE);
     }
-    users = users.map(u => ({...u, status: u.status || 'Active'}));
-    saveToStorage(STORAGE_KEYS.USERS, users);
+    saveToStorage(STORAGE_KEYS.USERS, users, false);
     localStorage.setItem(STORAGE_KEYS.DATA_VERSION, currentDataVersion);
 }
 
@@ -1147,7 +913,7 @@ export const RELEASE_NOTES = [
         title: 'Billing & Sync Improvements',
         features: [
             'Billing: Invoices now generated with precise billing dates matching client preferences.',
-            'Cloud Sync: "Restore Point" now performs a full database synchronization to Supabase.',
+            'Cloud Sync: "Restore Point" now performs a full database synchronization to the Neon-backed API.',
             'Fixes: Improved date handling for short months in auto-billing.'
         ]
     },

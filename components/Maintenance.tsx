@@ -1,6 +1,7 @@
 
 import React, { useState } from 'react';
 import { getBillboards, getMaintenanceLogs, addMaintenanceLog, runMaintenanceScheduler } from '../services/mockData';
+import { useToast } from './Toast';
 import { generateMaintenanceReportPDF } from '../services/pdfGenerator';
 import { MaintenanceLog } from '../types';
 import { Wrench, CheckCircle, AlertTriangle, XCircle, Search, Plus, Calendar, Save, History, FileText, X, RefreshCw, Download } from 'lucide-react';
@@ -22,6 +23,7 @@ const MinimalSelect = ({ label, value, onChange, options }: any) => (
 );
 
 export const Maintenance: React.FC = () => {
+    const toast = useToast();
     const [searchTerm, setSearchTerm] = useState('');
     const [isLogModalOpen, setIsLogModalOpen] = useState(false);
     const [logs, setLogs] = useState<MaintenanceLog[]>(getMaintenanceLogs());
@@ -74,12 +76,17 @@ export const Maintenance: React.FC = () => {
         setLogs(getMaintenanceLogs());
         setIsLogModalOpen(false);
         setNewLog({ billboardId: '', date: new Date().toISOString().split('T')[0], type: 'Visual Check', technician: '', notes: '', status: 'Pass', cost: 0 });
+        toast.success("Maintenance log saved.");
     };
 
     const handleRunAutoCheck = () => {
         const generated = runMaintenanceScheduler();
         setLogs(getMaintenanceLogs());
-        alert(generated > 0 ? `Auto-Scheduler created ${generated} new maintenance tasks for assets due for their 3-month check.` : "All assets are up to date with the 3-month inspection cycle.");
+        if (generated > 0) {
+            toast.info(`Auto-Scheduler created ${generated} new maintenance tasks for assets due for their 3-month check.`);
+        } else {
+            toast.success("All assets are up to date with the 3-month inspection cycle.");
+        }
     };
 
     const handleDownloadReport = () => {
