@@ -724,22 +724,31 @@ export const syncBillboardAvailability = () => {
         const board = resetBillboards[boardIndex];
 
         if (board.type === BillboardType.Static) {
-            if (contract.side === 'A' || contract.details.includes('Side A') || contract.details.includes('Side A & B')) {
+            // contract.side is the authoritative field. Only fall back to the
+            // free-text `details` blob when side is unset on a legacy row —
+            // substring matching against user-authored text was flipping the
+            // wrong side when details mentioned the opposite face in prose.
+            const side = contract.side ?? (
+                contract.details.includes('Side A & B') ? 'Both'
+                : contract.details.includes('Side A') ? 'A'
+                : contract.details.includes('Side B') ? 'B'
+                : undefined
+            );
+            if (side === 'A' || side === 'Both') {
                 board.sideAStatus = 'Rented';
                 board.sideAClientId = contract.clientId;
             }
-            if (contract.side === 'B' || contract.details.includes('Side B') || contract.details.includes('Side A & B')) {
+            if (side === 'B' || side === 'Both') {
                 board.sideBStatus = 'Rented';
-                board.sideBClientId = contract.clientId;
-            }
-            if (contract.side === 'Both') {
-                board.sideAStatus = 'Rented';
-                board.sideBStatus = 'Rented';
-                board.sideAClientId = contract.clientId;
                 board.sideBClientId = contract.clientId;
             }
         } else if (board.type === BillboardType.LED) {
-            board.rentedSlots = Math.min((board.rentedSlots || 0) + 1, board.totalSlots || 10);
+            // If totalSlots is unset we treat capacity as 0 (consistent with
+            // Dashboard/Availability). A board without configured slots can't
+            // accumulate rentedSlots — surfaces the data issue instead of
+            // silently clamping against a fake default of 10.
+            const cap = board.totalSlots || 0;
+            board.rentedSlots = Math.min((board.rentedSlots || 0) + 1, cap);
         }
     });
 
@@ -1188,7 +1197,7 @@ export const getExpiringContracts = () => {
     });
 };
 
-export const getOverdueInvoices = () => invoices.filter(i => i.status === 'Pending' || i.status === 'Overdue');
+export const getOverdueInvoices = () => invoices.filter(i => i.status === 'Overdue');
 export const getSystemAlertCount = () => getExpiringContracts().length + getOverdueInvoices().length + maintenanceLogs.filter(l => new Date(l.nextDueDate) <= new Date() || l.status === 'Needs Attention').length;
 
 export const getFinancialTrends = () => {

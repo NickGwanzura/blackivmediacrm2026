@@ -96,7 +96,12 @@ export const Dashboard: React.FC = () => {
   ];
 
   // --- Clients & Contracts ---
-  const activeContracts = contracts.filter(c => c.status === 'Active').length;
+  // Mirror syncBillboardAvailability: an Active contract whose endDate is in
+  // the past doesn't contribute to occupancy, so it shouldn't inflate this
+  // KPI either. No automated sweep flips stale Actives to Expired yet.
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const activeContracts = contracts.filter(c => c.status === 'Active' && new Date(c.endDate) >= startOfToday).length;
   const activeClients = clients.filter(c => c.status === 'Active').length;
 
   // --- Revenue by Town ---
