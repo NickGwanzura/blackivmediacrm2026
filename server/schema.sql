@@ -23,6 +23,8 @@ CREATE TABLE IF NOT EXISTS billboards (
   side_b_rate     NUMERIC,
   side_a_status   TEXT,
   side_b_status   TEXT,
+  side_a_client_id TEXT,
+  side_b_client_id TEXT,
   rate_per_slot   NUMERIC,
   total_slots     INTEGER,
   rented_slots    INTEGER,

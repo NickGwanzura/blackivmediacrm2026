@@ -82,14 +82,15 @@ export const getApiConfig = () => ({ url: remoteApiUrl, key: remoteApiKey });
 const pushToRemote = async (key: string, data: any) => {
     const collectionName = key.replace('bi_', '');
 
-    // Never push plaintext passwords over /sync. The auth server strips them
-    // too, but sanitize client-side as defence-in-depth — also prevents any
-    // legacy localStorage copy from leaking into request logs.
+    // Never push plaintext passwords or reset-token state over /sync. The
+    // auth server strips them too, but sanitize client-side as defence-in-
+    // depth — also prevents any legacy localStorage copy from leaking into
+    // request logs. Password/reset state is owned exclusively by /auth/*.
     let payload: any = data;
     if (key === STORAGE_KEYS.USERS && Array.isArray(data)) {
         payload = data.map((u: any) => {
             if (!u || typeof u !== 'object') return u;
-            const { password, ...rest } = u;
+            const { password, password_reset_token, password_reset_expires, ...rest } = u;
             return rest;
         });
     }

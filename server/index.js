@@ -7,34 +7,58 @@ const { createAuthRouter, requireAuth, requireRole, ensureInitialAdmin } = requi
 const { runMigrations } = require('./migrate');
 
 const app = express();
-app.use(express.json({ limit: '25mb' }));
+// Railway terminates TLS at its edge. Trust the first proxy hop so req.secure
+// and cookie Secure detection work correctly behind X-Forwarded-* headers.
+app.set('trust proxy', 1);
+// Default small JSON body limit — protects /auth/* and other small endpoints
+// from trivial DoS via oversized bodies. Routes that legitimately need more
+// (e.g. /sync, /email/send with attachments) opt in to a larger limit at the
+// route level.
+app.use(express.json({ limit: '256kb' }));
 app.use(cookieParser());
 
 const resendClient = process.env.RESEND_API_KEY
   ? new Resend(process.env.RESEND_API_KEY)
   : null;
 
-// CORS — must reflect the request origin (not `*`) because the auth flow
-// uses credentialed cookies, which browsers block when Origin is wildcarded.
-// Set ALLOWED_ORIGIN to lock this down in production.
+// ---- CORS ----
+// Parse ALLOWED_ORIGIN as a comma-separated allowlist. An empty allowlist in
+// dev means "reflect the request origin" for convenience; in production, an
+// empty allowlist means "do not set CORS headers" (safe for same-origin Railway
+// deploys).
+const CORS_ALLOWLIST = (process.env.ALLOWED_ORIGIN || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+let corsDevWarningLogged = false;
+if (process.env.NODE_ENV === 'production' && CORS_ALLOWLIST.length === 0) {
+  console.warn('[cors] ⚠️  ALLOWED_ORIGIN is empty in production. CORS headers will not be set — this is safe for same-origin deploys but will block cross-origin browsers.');
+}
+
 app.use((req, res, next) => {
   const requestOrigin = req.headers.origin;
-  const configured = process.env.ALLOWED_ORIGIN;
-  let allowed;
-  if (configured && configured !== '*') {
-    allowed = configured;
-  } else if (requestOrigin) {
-    allowed = requestOrigin;
-  } else {
-    allowed = '*';
+  const inAllowlist = requestOrigin && CORS_ALLOWLIST.includes(requestOrigin);
+  const devReflect =
+    !inAllowlist &&
+    process.env.NODE_ENV !== 'production' &&
+    CORS_ALLOWLIST.length === 0 &&
+    !!requestOrigin;
+
+  if (devReflect && !corsDevWarningLogged) {
+    console.warn('[cors] ⚠️  ALLOWED_ORIGIN is empty in development — reflecting request Origin. Set ALLOWED_ORIGIN before deploying.');
+    corsDevWarningLogged = true;
   }
-  if (allowed !== '*') {
+
+  if (inAllowlist || devReflect) {
     res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Origin', requestOrigin);
     res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-API-KEY');
   }
-  res.setHeader('Access-Control-Allow-Origin', allowed);
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-API-KEY');
+  // Never emit Access-Control-Allow-Origin: * — it would break credentialed
+  // requests and is unsafe for an authenticated API.
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
@@ -61,10 +85,11 @@ app.use('/auth', createAuthRouter({
 
 // ---- Protected endpoints ----
 // Every write goes through requireAuth. /sync and /delete allow any
-// authenticated user; admin-only endpoints like /force-push require Admin.
+// authenticated user (with per-collection guards below for sensitive
+// collections like users); admin-only endpoints like /force-push require Admin.
 app.use('/sync', requireAuth);
 app.use('/delete', requireAuth);
-app.use('/email', requireAuth);
+app.use('/email', requireAuth, requireRole('Admin', 'Manager'));
 app.use('/force-push', requireAuth, requireRole('Admin'));
 
 // /health is a liveness probe (process up) so a Neon outage doesn't take
@@ -80,12 +105,23 @@ app.get('/health/db', async (_req, res) => {
   }
 });
 
-// GET /sync/all → returns { [key]: value } for every row in app_data
-app.get('/sync/all', async (_req, res) => {
+// GET /sync/all → returns { [key]: value } for every row in app_data.
+// Requires auth so the users JSONB (which historically contained plaintext
+// passwords) is never returned to anonymous callers. Sensitive user fields
+// are stripped from the response even for authenticated callers — password
+// state only flows through /auth/*.
+app.get('/sync/all', requireAuth, async (_req, res) => {
   try {
     const rows = await sql`SELECT key, value FROM app_data`;
     const out = {};
     for (const r of rows) out[r.key] = r.value;
+    if (out.users && Array.isArray(out.users)) {
+      out.users = out.users.map((u) => {
+        if (!u || typeof u !== 'object') return u;
+        const { password, password_reset_token, password_reset_expires, ...rest } = u;
+        return rest;
+      });
+    }
     res.json(out);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -93,19 +129,33 @@ app.get('/sync/all', async (_req, res) => {
 });
 
 // POST /sync  body: { collection: string, data: any }
-app.post('/sync', async (req, res) => {
+// Uses a route-level 10 MB parser because bulk imports (billboards, contracts,
+// full backups) can legitimately be multi-MB.
+app.post('/sync', express.json({ limit: '10mb' }), async (req, res) => {
   const { collection } = req.body || {};
   let { data } = req.body || {};
   if (!collection) return res.status(400).json({ error: 'collection is required' });
 
-  // Never let client-side sync put plaintext passwords into the blob or
-  // the relational mirror. All password writes must go through /auth/*.
-  if (collection === 'users' && Array.isArray(data)) {
-    data = data.map((u) => {
-      if (!u || typeof u !== 'object') return u;
-      const { password, ...rest } = u;
-      return rest;
-    });
+  // Privilege-escalation guard: writing to the users collection can grant
+  // Admin role / Active status / clear mustChangePassword. Only admins.
+  if (collection === 'users') {
+    if (!req.user || req.user.role !== 'Admin') {
+      return res.status(403).json({ error: 'Admin role required to sync users' });
+    }
+    // Even for admins, never let /sync touch password state. Those fields
+    // are owned exclusively by /auth/*.
+    if (Array.isArray(data)) {
+      data = data.map((u) => {
+        if (!u || typeof u !== 'object') return u;
+        const {
+          password,
+          password_reset_token,
+          password_reset_expires,
+          ...rest
+        } = u;
+        return rest;
+      });
+    }
   }
 
   try {
@@ -124,6 +174,12 @@ app.post('/sync', async (req, res) => {
 // DELETE /delete/:collection/:id → removes a row from the relational mirror
 app.delete('/delete/:collection/:id', async (req, res) => {
   const { collection, id } = req.params;
+  // Deleting a user is an admin-only action (account lifecycle).
+  if (collection === 'users') {
+    if (!req.user || req.user.role !== 'Admin') {
+      return res.status(403).json({ error: 'Admin role required to delete users' });
+    }
+  }
   const table = RELATIONAL_TABLES[collection];
   if (!table) return res.json({ ok: true, skipped: true });
   try {
@@ -135,7 +191,11 @@ app.delete('/delete/:collection/:id', async (req, res) => {
 });
 
 // POST /email/send  body: { to, cc?, bcc?, subject, html?, text?, attachments?: [{filename, content (base64), contentType?}] }
-app.post('/email/send', async (req, res) => {
+// Attachments can be large (invoice PDFs + supporting docs), so this route
+// opts into a 25 MB parser. Total decoded attachment bytes are additionally
+// capped below at 10 MB.
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024; // 10 MB
+app.post('/email/send', express.json({ limit: '25mb' }), async (req, res) => {
   if (!resendClient) {
     return res.status(500).json({ error: 'RESEND_API_KEY is not configured on the server.' });
   }
@@ -144,16 +204,34 @@ app.post('/email/send', async (req, res) => {
     return res.status(400).json({ error: 'to, subject, and html or text are required' });
   }
   try {
+    // `from` is always derived from env — never trust client-supplied `from`.
     const from = process.env.EMAIL_FROM || 'Black Ivy Media <onboarding@resend.dev>';
-    const normalizedAttachments = Array.isArray(attachments)
-      ? attachments
-          .filter((a) => a && a.filename && a.content)
-          .map((a) => ({
-            filename: a.filename,
-            content: Buffer.from(a.content, 'base64'),
-            contentType: a.contentType || 'application/pdf',
-          }))
-      : undefined;
+
+    let normalizedAttachments;
+    if (Array.isArray(attachments)) {
+      const filtered = attachments.filter((a) => a && a.filename && a.content);
+      let totalBytes = 0;
+      const decoded = [];
+      for (const a of filtered) {
+        const buf = Buffer.from(a.content, 'base64');
+        totalBytes += buf.length;
+        if (totalBytes > MAX_ATTACHMENT_BYTES) {
+          return res.status(413).json({ error: 'Total attachments exceed 10 MB' });
+        }
+        decoded.push({
+          filename: a.filename,
+          content: buf,
+          contentType: a.contentType || 'application/pdf',
+        });
+      }
+      normalizedAttachments = decoded.length ? decoded : undefined;
+    }
+
+    // Audit log: record who sent what to whom. No body included — just the
+    // metadata needed to track down abuse later.
+    try {
+      console.log('[email]', req.user?.email || 'unknown', '→', to, subject);
+    } catch { /* best-effort logging */ }
 
     const result = await resendClient.emails.send({
       from,
@@ -194,6 +272,7 @@ const ROW_MAPPERS = {
     width: b.width, height: b.height, coordinates: b.coordinates, image_url: b.imageUrl,
     visibility: b.visibility, side_a_rate: b.sideARate, side_b_rate: b.sideBRate,
     side_a_status: b.sideAStatus, side_b_status: b.sideBStatus,
+    side_a_client_id: b.sideAClientId || null, side_b_client_id: b.sideBClientId || null,
     rate_per_slot: b.ratePerSlot, total_slots: b.totalSlots, rented_slots: b.rentedSlots,
   }),
   clients: (c) => ({
@@ -277,6 +356,9 @@ module.exports = app;
 
 if (require.main === module) {
   const port = process.env.PORT || 8080;
+  if (process.env.NODE_ENV === 'production' && !process.env.APP_URL) {
+    console.warn('[boot] ⚠️  APP_URL is not set in production. Password-reset emails will be suppressed to prevent host-header injection. Set APP_URL to the canonical public origin (e.g. https://crm.example.com).');
+  }
   // Best-effort migrations + admin seeding. Never crash the server on
   // failure — the API should still come up for observability.
   (async () => {

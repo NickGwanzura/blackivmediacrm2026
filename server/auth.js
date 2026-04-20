@@ -8,7 +8,13 @@ const { sql } = require('./db');
 const COOKIE_NAME = 'bim_session';
 const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days
 const RESET_TOKEN_TTL_SECONDS = 60 * 60;       // 1 hour
-const BCRYPT_COST = 10;
+const BCRYPT_COST = 12;
+
+// Pre-computed bcrypt hash of a throwaway string. Used only to spend CPU
+// time on login attempts for non-existent emails so response timing doesn't
+// leak whether an address is registered. Must match BCRYPT_COST so the
+// dummy compare takes roughly the same wall clock as a real compare.
+const DUMMY_HASH = bcrypt.hashSync('dummy', BCRYPT_COST);
 
 function getJwtSecret() {
   const secret = process.env.JWT_SECRET;
@@ -45,9 +51,11 @@ function sessionCookieOptions(req) {
   };
 }
 
-function issueSessionCookie(res, req, user) {
+function issueSessionCookie(res, req, user, epoch) {
+  // `epoch` must reflect the user's current session_epoch so password
+  // changes can invalidate outstanding sessions (see requireAuth).
   const token = jwt.sign(
-    { sub: user.id, role: user.role, email: user.email },
+    { sub: user.id, role: user.role, email: user.email, epoch: epoch || 1 },
     getJwtSecret(),
     { expiresIn: SESSION_TTL_SECONDS, algorithm: 'HS256' },
   );
@@ -97,10 +105,18 @@ async function findUserById(id) {
   return rows[0] || null;
 }
 
+const LEGACY_PASSWORD_PLACEHOLDERS = new Set(['null', 'undefined', 'NULL', 'UNDEFINED']);
+
 async function upgradePasswordIfLegacy(user, plaintext) {
   // If password doesn't look like a bcrypt hash, treat it as legacy plaintext.
   if (typeof user.password !== 'string' || !user.password) return false;
   if (user.password.startsWith('$2')) return false;
+  // Guard: never accept an empty/short/placeholder legacy password. An
+  // attacker supplying "" should not match a corrupt row whose password
+  // column is an empty string.
+  if (user.password.length < 8) return false;
+  if (LEGACY_PASSWORD_PLACEHOLDERS.has(user.password)) return false;
+  if (typeof plaintext !== 'string' || plaintext.length < 1) return false;
   if (user.password !== plaintext) return false;
   const hash = await bcrypt.hash(plaintext, BCRYPT_COST);
   await sql.query(`UPDATE users SET password = $1, updated_at = NOW() WHERE id = $2`, [hash, user.id]);
@@ -146,9 +162,15 @@ async function requireAuth(req, res, next) {
     if (!row) return res.status(401).json({ error: 'Not authenticated' });
     if (row.status === 'Denied') return res.status(403).json({ error: 'Account has been suspended' });
     if (row.status === 'Pending') return res.status(403).json({ error: 'Awaiting administrator approval' });
+    // Session-epoch check: password changes / resets bump the epoch and
+    // invalidate every outstanding cookie. Missing/mismatched → 401.
+    const currentEpoch = row.session_epoch || 1;
+    if (!payload.epoch || payload.epoch !== currentEpoch) {
+      return res.status(401).json({ error: 'Not authenticated' });
+    }
     req.user = toClientUser(row);
-    // Sliding renewal on every authenticated request.
-    issueSessionCookie(res, req, req.user);
+    // Sliding renewal on every authenticated request — reuse current epoch.
+    issueSessionCookie(res, req, req.user, currentEpoch);
     return next();
   } catch (e) {
     console.error('[auth] requireAuth lookup failed:', e.message);
@@ -186,21 +208,53 @@ async function sendAuthEmail(resendClient, { to, subject, html }) {
   }
 }
 
+// Returns the canonical origin used to build links in outbound emails.
+// - If APP_URL is set, always use it (trusted configuration).
+// - Else in dev, fall back to the request origin (convenience).
+// - Else in production, return null so the caller knows to refuse to send
+//   an email whose link would be host-header attacker-controlled.
 function getAppUrl(req) {
   if (process.env.APP_URL) return process.env.APP_URL;
+  if (process.env.NODE_ENV === 'production') return null;
   const proto = req.headers['x-forwarded-proto']?.split(',')[0].trim() || req.protocol || 'http';
   const host = req.headers['x-forwarded-host'] || req.headers.host;
   return `${proto}://${host}`;
 }
 
+function passwordPolicySatisfied(pw) {
+  return (
+    typeof pw === 'string' &&
+    pw.length >= 8 &&
+    /[A-Z]/.test(pw) &&
+    /[0-9]/.test(pw)
+  );
+}
+
 function genTempPassword(length = 16) {
   const charset = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
-  const bytes = crypto.randomBytes(length);
-  let pw = '';
-  for (let i = 0; i < length; i++) pw += charset[bytes[i] % charset.length];
-  // Ensure policy compliance.
-  pw = 'A' + pw.slice(1, -1) + '7';
-  return pw;
+  // Retry up to 5 times to land on a policy-compliant random string so we
+  // don't sacrifice entropy by hard-setting specific positions. With a
+  // charset that contains plenty of uppercase + digits, the probability
+  // of needing more than one attempt at length >= 16 is vanishingly small.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const bytes = crypto.randomBytes(length);
+    let pw = '';
+    for (let i = 0; i < length; i++) pw += charset[bytes[i] % charset.length];
+    if (passwordPolicySatisfied(pw)) return pw;
+  }
+  throw new Error('genTempPassword failed to satisfy policy after 5 attempts');
+}
+
+function hashResetToken(token) {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+function constantTimeEquals(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
 }
 
 // ---- Router ----
@@ -212,7 +266,13 @@ function createAuthRouter({ resendClient, getCompanyName }) {
     if (!email || !password) return res.status(400).json({ error: 'Email and password are required' });
     try {
       const row = await findUserByEmail(email);
-      if (!row) return res.status(401).json({ error: 'Invalid email or password' });
+      if (!row) {
+        // Constant-time-ish: spend the same CPU on a bcrypt.compare as a
+        // real login would, so response timing doesn't reveal whether the
+        // email exists. Ignore the result.
+        try { await bcrypt.compare(password, DUMMY_HASH); } catch { /* ignore */ }
+        return res.status(401).json({ error: 'Invalid email or password' });
+      }
       const ok = await comparePassword(row, password);
       if (!ok) return res.status(401).json({ error: 'Invalid email or password' });
       if (row.status === 'Pending') return res.status(403).json({ error: 'Awaiting administrator approval' });
@@ -220,7 +280,7 @@ function createAuthRouter({ resendClient, getCompanyName }) {
       // Re-fetch so we return the freshly-upgraded password_hash state.
       const fresh = await findUserById(row.id);
       const user = toClientUser(fresh);
-      issueSessionCookie(res, req, user);
+      issueSessionCookie(res, req, user, fresh.session_epoch || 1);
       return res.json({ user });
     } catch (e) {
       console.error('[auth] /login error:', e);
@@ -268,8 +328,12 @@ function createAuthRouter({ resendClient, getCompanyName }) {
       if (row.status === 'Denied' || row.status === 'Pending') {
         return res.status(401).json({ error: 'Not authenticated' });
       }
+      const currentEpoch = row.session_epoch || 1;
+      if (!payload.epoch || payload.epoch !== currentEpoch) {
+        return res.status(401).json({ error: 'Not authenticated' });
+      }
       const user = toClientUser(row);
-      issueSessionCookie(res, req, user); // sliding renewal
+      issueSessionCookie(res, req, user, currentEpoch); // sliding renewal
       return res.json({ user });
     } catch (e) {
       console.error('[auth] /me error:', e);
@@ -289,18 +353,34 @@ function createAuthRouter({ resendClient, getCompanyName }) {
     try {
       const row = await findUserByEmail(email);
       if (row && row.status !== 'Denied') {
+        // Embed the current session_epoch in the reset JWT. If the user
+        // resets or changes password before using this link, the epoch
+        // will have moved and /reset-confirm will reject the token.
+        const currentEpoch = row.session_epoch || 1;
         const token = jwt.sign(
-          { sub: row.id, purpose: 'reset' },
+          { sub: row.id, purpose: 'reset', epoch: currentEpoch },
           getJwtSecret(),
           { expiresIn: RESET_TOKEN_TTL_SECONDS, algorithm: 'HS256' },
         );
+        // Store only the sha256 of the token at rest so a DB leak cannot
+        // be used to walk outstanding reset links. The JWT's signature is
+        // still the primary trust anchor; the DB hash is the single-use
+        // / invalidation layer.
+        const tokenHash = hashResetToken(token);
         await sql.query(
           `UPDATE users SET password_reset_token = $1,
              password_reset_expires = NOW() + INTERVAL '1 hour', updated_at = NOW()
            WHERE id = $2`,
-          [token, row.id],
+          [tokenHash, row.id],
         );
         const appUrl = getAppUrl(req);
+        if (!appUrl) {
+          // Production without APP_URL: refuse to send — the link would be
+          // built from the request Host header and is attacker-controllable.
+          // Respond 204 anyway so we don't leak the misconfig to callers.
+          console.error('[auth] /reset-request suppressed: APP_URL is not set in production. Set APP_URL to send reset emails.');
+          return res.status(204).end();
+        }
         const resetUrl = `${appUrl}/?reset=${encodeURIComponent(token)}`;
         const sender = (getCompanyName && getCompanyName()) || 'Black Ivy Media';
         const html = `
@@ -331,16 +411,30 @@ function createAuthRouter({ resendClient, getCompanyName }) {
     try {
       const row = await findUserById(payload.sub);
       if (!row) return res.status(400).json({ error: 'Invalid or expired reset token' });
-      if (row.password_reset_token !== token) {
+      // Reset token JWT carries the session_epoch it was issued against.
+      // If the epoch has moved (e.g. another reset already ran), reject.
+      const currentEpoch = row.session_epoch || 1;
+      if (!payload.epoch || payload.epoch !== currentEpoch) {
+        return res.status(400).json({ error: 'Invalid or expired reset token' });
+      }
+      // DB stores sha256(token); compare in constant time.
+      const expectedHash = hashResetToken(token);
+      if (!row.password_reset_token || !constantTimeEquals(row.password_reset_token, expectedHash)) {
         return res.status(400).json({ error: 'Invalid or expired reset token' });
       }
       if (row.password_reset_expires && new Date(row.password_reset_expires) < new Date()) {
         return res.status(400).json({ error: 'Invalid or expired reset token' });
       }
       await setPassword(row.id, password, { mustChange: false });
+      // Bump session_epoch: invalidates every outstanding cookie and reset
+      // link keyed to this user, then issue a fresh cookie for the new epoch.
+      await sql.query(
+        `UPDATE users SET session_epoch = COALESCE(session_epoch, 1) + 1, updated_at = NOW() WHERE id = $1`,
+        [row.id],
+      );
       const fresh = await findUserById(row.id);
       const user = toClientUser(fresh);
-      issueSessionCookie(res, req, user);
+      issueSessionCookie(res, req, user, fresh.session_epoch || 1);
       return res.json({ user });
     } catch (e) {
       console.error('[auth] /reset-confirm error:', e);
@@ -360,9 +454,15 @@ function createAuthRouter({ resendClient, getCompanyName }) {
       const ok = await comparePassword(row, currentPassword);
       if (!ok) return res.status(400).json({ error: 'Current password is incorrect' });
       await setPassword(row.id, newPassword, { mustChange: false });
+      // Bump session_epoch so other devices / stolen cookies stop working,
+      // then issue a fresh cookie for the current request at the new epoch.
+      await sql.query(
+        `UPDATE users SET session_epoch = COALESCE(session_epoch, 1) + 1, updated_at = NOW() WHERE id = $1`,
+        [row.id],
+      );
       const fresh = await findUserById(row.id);
       const user = toClientUser(fresh);
-      issueSessionCookie(res, req, user);
+      issueSessionCookie(res, req, user, fresh.session_epoch || 1);
       return res.json({ user });
     } catch (e) {
       console.error('[auth] /change-password error:', e);
@@ -378,14 +478,18 @@ function createAuthRouter({ resendClient, getCompanyName }) {
       await sql.query(`UPDATE users SET status = 'Active', updated_at = NOW() WHERE id = $1`, [userId]);
       const sender = (getCompanyName && getCompanyName()) || 'Black Ivy Media';
       const appUrl = getAppUrl(req);
-      const html = `
-        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; color:#1e293b; line-height:1.55; font-size:14px; max-width:560px;">
-          <p>Hi ${row.first_name || ''},</p>
-          <p>Your account at <strong>${sender}</strong> has been approved by an administrator. You can now sign in.</p>
-          <p><a href="${appUrl}" style="display:inline-block; padding:10px 18px; background:#059669; color:#fff; border-radius:8px; text-decoration:none; font-weight:600;">Sign in</a></p>
-          <p style="margin-top:24px;">Kind regards,<br/><strong>${sender}</strong></p>
-        </div>`.trim();
-      await sendAuthEmail(resendClient, { to: row.email, subject: `Account approved — welcome to ${sender}`, html });
+      if (!appUrl) {
+        console.error('[auth] /approve: skipping approval email — APP_URL not set in production.');
+      } else {
+        const html = `
+          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; color:#1e293b; line-height:1.55; font-size:14px; max-width:560px;">
+            <p>Hi ${row.first_name || ''},</p>
+            <p>Your account at <strong>${sender}</strong> has been approved by an administrator. You can now sign in.</p>
+            <p><a href="${appUrl}" style="display:inline-block; padding:10px 18px; background:#059669; color:#fff; border-radius:8px; text-decoration:none; font-weight:600;">Sign in</a></p>
+            <p style="margin-top:24px;">Kind regards,<br/><strong>${sender}</strong></p>
+          </div>`.trim();
+        await sendAuthEmail(resendClient, { to: row.email, subject: `Account approved — welcome to ${sender}`, html });
+      }
       const fresh = await findUserById(userId);
       return res.json({ user: toClientUser(fresh) });
     } catch (e) {
@@ -415,19 +519,23 @@ function createAuthRouter({ resendClient, getCompanyName }) {
       );
       const sender = (getCompanyName && getCompanyName()) || 'Black Ivy Media';
       const appUrl = getAppUrl(req);
-      const html = `
-        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; color:#1e293b; line-height:1.55; font-size:14px; max-width:560px;">
-          <p>You've been invited to join <strong>${sender}</strong> as a <strong>${role}</strong>.</p>
-          <p>Please sign in with the temporary credentials below. Your account will activate once an administrator approves it.</p>
-          <table style="margin:16px 0; border-collapse:collapse; font-size:13px;">
-            <tr><td style="padding:4px 16px 4px 0; color:#64748b;">Email</td><td style="padding:4px 0;"><strong>${email}</strong></td></tr>
-            <tr><td style="padding:4px 16px 4px 0; color:#64748b;">Temporary password</td><td style="padding:4px 0;"><code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background:#f1f5f9; padding:4px 10px; border-radius:6px;">${tempPassword}</code></td></tr>
-            <tr><td style="padding:4px 16px 4px 0; color:#64748b;">Sign in at</td><td style="padding:4px 0;"><a href="${appUrl}" style="color:#2563eb;">${appUrl}</a></td></tr>
-          </table>
-          <p style="color:#64748b; font-size:12px;">You will be required to change this password after first sign in.</p>
-          <p style="margin-top:24px;">Kind regards,<br/><strong>${sender}</strong></p>
-        </div>`.trim();
-      await sendAuthEmail(resendClient, { to: email, subject: `You've been invited to ${sender}`, html });
+      if (!appUrl) {
+        console.error('[auth] /invite: skipping invite email — APP_URL not set in production. Temp password was not emailed; share it via a secure side channel or re-run after configuring APP_URL.');
+      } else {
+        const html = `
+          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; color:#1e293b; line-height:1.55; font-size:14px; max-width:560px;">
+            <p>You've been invited to join <strong>${sender}</strong> as a <strong>${role}</strong>.</p>
+            <p>Please sign in with the temporary credentials below. Your account will activate once an administrator approves it.</p>
+            <table style="margin:16px 0; border-collapse:collapse; font-size:13px;">
+              <tr><td style="padding:4px 16px 4px 0; color:#64748b;">Email</td><td style="padding:4px 0;"><strong>${email}</strong></td></tr>
+              <tr><td style="padding:4px 16px 4px 0; color:#64748b;">Temporary password</td><td style="padding:4px 0;"><code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background:#f1f5f9; padding:4px 10px; border-radius:6px;">${tempPassword}</code></td></tr>
+              <tr><td style="padding:4px 16px 4px 0; color:#64748b;">Sign in at</td><td style="padding:4px 0;"><a href="${appUrl}" style="color:#2563eb;">${appUrl}</a></td></tr>
+            </table>
+            <p style="color:#64748b; font-size:12px;">You will be required to change this password after first sign in.</p>
+            <p style="margin-top:24px;">Kind regards,<br/><strong>${sender}</strong></p>
+          </div>`.trim();
+        await sendAuthEmail(resendClient, { to: email, subject: `You've been invited to ${sender}`, html });
+      }
       const fresh = await findUserById(id);
       return res.status(201).json({ user: toClientUser(fresh) });
     } catch (e) {
