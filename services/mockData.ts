@@ -908,6 +908,16 @@ export const restoreSystemBackup = (jsonString: string): boolean => {
 
 export const RELEASE_NOTES = [
     {
+        version: '2.2.0',
+        date: '20/4/2026',
+        title: 'Admin-Managed Access & Neon Backend',
+        features: [
+            'Access: Self-service registration removed — accounts are now provisioned by administrators.',
+            'Backend: Migrated from Supabase to a Neon-backed Express API for faster, more reliable sync.',
+            'Login: Refreshed sign-in screen with a live version widget and clean password-reset flow.'
+        ]
+    },
+    {
         version: '2.1.5',
         date: '21/8/2025',
         title: 'Billing & Sync Improvements',

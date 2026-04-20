@@ -1,14 +1,14 @@
 
 import React, { useEffect, useState } from 'react';
-import { login, register, requestPasswordReset, confirmPasswordReset } from '../services/authService';
+import { login, requestPasswordReset, confirmPasswordReset } from '../services/authService';
 import { RELEASE_NOTES } from '../services/mockData';
-import { User, Lock, Mail, ArrowRight, Loader2, ArrowLeft, Send, ShieldAlert, CheckCircle } from 'lucide-react';
+import { Lock, Mail, ArrowRight, Loader2, ArrowLeft, Send, CheckCircle } from 'lucide-react';
 
 interface AuthProps {
     onLogin: () => void;
 }
 
-type AuthMode = 'login' | 'register' | 'forgot' | 'verify_email' | 'email_sent' | 'pending_approval' | 'reset_confirm' | 'reset_success';
+type AuthMode = 'login' | 'forgot' | 'email_sent' | 'reset_confirm' | 'reset_success';
 
 export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
     const [mode, setMode] = useState<AuthMode>('login');
@@ -20,8 +20,6 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [newPassword, setNewPassword] = useState('');
-    const [firstName, setFirstName] = useState('');
-    const [lastName, setLastName] = useState('');
     const [resetToken, setResetToken] = useState<string | null>(null);
 
     // Detect ?reset=<token> on mount and switch into the reset-confirm flow.
@@ -44,14 +42,6 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
             if (mode === 'login') {
                 const user = await login(email, password);
                 if (user) onLogin();
-            } else if (mode === 'register') {
-                if (!firstName || !lastName) {
-                    setError('Please fill in all fields');
-                    setIsLoading(false);
-                    return;
-                }
-                await register(firstName, lastName, email, password);
-                setMode('pending_approval');
             } else if (mode === 'forgot') {
                 await requestPasswordReset(email);
                 setMode('email_sent');
@@ -84,26 +74,6 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
         setPassword('');
         setNewPassword('');
     };
-
-    const renderPendingScreen = () => (
-        <div className="text-center space-y-6 animate-fade-in">
-            <div className="w-16 h-16 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center mx-auto shadow-sm">
-                <ShieldAlert size={32} />
-            </div>
-            <div>
-                <h2 className="text-2xl font-bold text-slate-900">Registration Pending</h2>
-                <p className="text-slate-500 mt-2 text-sm leading-relaxed">
-                    Your account has been created successfully. However, for security reasons, all new accounts require <span className="font-bold text-slate-700">Administrator Approval</span> before you can log in.
-                </p>
-                <p className="text-slate-500 mt-4 text-sm">
-                    You'll receive an email once your account is approved.
-                </p>
-            </div>
-            <div className="pt-4">
-                <button onClick={() => toggleMode('login')} className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold uppercase tracking-wider text-xs hover:bg-slate-800 transition-all">Back to Login</button>
-            </div>
-        </div>
-    );
 
     const renderSentScreen = () => (
         <div className="text-center space-y-6 animate-fade-in">
@@ -139,7 +109,7 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
         </div>
     );
 
-    const screenMode = mode === 'pending_approval' || mode === 'email_sent' || mode === 'reset_success';
+    const screenMode = mode === 'email_sent' || mode === 'reset_success';
 
     return (
         <div className="min-h-screen w-full flex bg-white font-sans relative">
@@ -203,20 +173,17 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
                         </h1>
                     </div>
 
-                    {mode === 'pending_approval' ? renderPendingScreen() :
-                     mode === 'email_sent' ? renderSentScreen() :
+                    {mode === 'email_sent' ? renderSentScreen() :
                      mode === 'reset_success' ? renderResetSuccessScreen() : (
                         <>
                             <div className="text-left mb-10">
                                 <h1 className="text-3xl font-bold text-slate-900 tracking-tight mb-2">
                                     {mode === 'login' ? 'Welcome back' :
-                                     mode === 'register' ? 'Create account' :
                                      mode === 'forgot' ? 'Reset Password' :
                                      'Set a new password'}
                                 </h1>
                                 <p className="text-slate-500">
                                     {mode === 'login' && 'Enter your credentials to access the dashboard.'}
-                                    {mode === 'register' && 'Enter your details to get started.'}
                                     {mode === 'forgot' && 'Enter your email to receive a reset link.'}
                                     {mode === 'reset_confirm' && 'Enter a new password to complete the reset.'}
                                 </p>
@@ -229,37 +196,6 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
                             )}
 
                             <form onSubmit={handleSubmit} className="space-y-6">
-                                {mode === 'register' && (
-                                    <div className="grid grid-cols-2 gap-4 animate-fade-in">
-                                        <div className="space-y-1.5">
-                                            <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">First Name</label>
-                                            <div className="relative">
-                                                <User className="absolute left-3 top-3.5 text-slate-400" size={18} />
-                                                <input
-                                                    type="text"
-                                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-10 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-black/5 focus:border-black transition-all text-sm font-medium"
-                                                    placeholder="John"
-                                                    value={firstName}
-                                                    onChange={e => setFirstName(e.target.value)}
-                                                />
-                                            </div>
-                                        </div>
-                                        <div className="space-y-1.5">
-                                            <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Last Name</label>
-                                            <div className="relative">
-                                                <User className="absolute left-3 top-3.5 text-slate-400" size={18} />
-                                                <input
-                                                    type="text"
-                                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-10 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-black/5 focus:border-black transition-all text-sm font-medium"
-                                                    placeholder="Doe"
-                                                    value={lastName}
-                                                    onChange={e => setLastName(e.target.value)}
-                                                />
-                                            </div>
-                                        </div>
-                                    </div>
-                                )}
-
                                 {mode !== 'reset_confirm' && (
                                     <div className="space-y-1.5">
                                         <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">
@@ -279,19 +215,17 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
                                     </div>
                                 )}
 
-                                {(mode === 'login' || mode === 'register') && (
+                                {mode === 'login' && (
                                     <div className="space-y-1.5 animate-fade-in">
                                         <div className="flex justify-between items-center">
                                             <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Password</label>
-                                            {mode === 'login' && (
-                                                <button
-                                                    type="button"
-                                                    onClick={() => toggleMode('forgot')}
-                                                    className="text-xs text-orange-600 hover:text-orange-700 font-bold transition-colors"
-                                                >
-                                                    Forgot Password?
-                                                </button>
-                                            )}
+                                            <button
+                                                type="button"
+                                                onClick={() => toggleMode('forgot')}
+                                                className="text-xs text-orange-600 hover:text-orange-700 font-bold transition-colors"
+                                            >
+                                                Forgot Password?
+                                            </button>
                                         </div>
                                         <div className="relative">
                                             <Lock className="absolute left-3 top-3.5 text-slate-400" size={18} />
@@ -332,7 +266,6 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
                                 >
                                     {isLoading ? <Loader2 className="animate-spin" size={18} /> : (
                                         mode === 'login' ? 'Sign In' :
-                                        mode === 'register' ? 'Create Account' :
                                         mode === 'forgot' ? 'Send Reset Link' :
                                         'Set New Password'
                                     )}
@@ -340,26 +273,14 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
                                 </button>
                             </form>
 
-                            {!screenMode && (
+                            {!screenMode && (mode === 'forgot' || mode === 'reset_confirm') && (
                                 <div className="mt-8 pt-6 border-t border-slate-100 flex flex-col items-center gap-4">
-                                    {(mode === 'forgot' || mode === 'reset_confirm') ? (
-                                        <button
-                                            onClick={() => toggleMode('login')}
-                                            className="text-slate-500 text-sm hover:text-slate-900 font-medium flex items-center justify-center gap-2 mx-auto transition-colors"
-                                        >
-                                            <ArrowLeft size={16} /> Back to Login
-                                        </button>
-                                    ) : (
-                                        <p className="text-slate-500 text-sm">
-                                            {mode === 'login' ? "Don't have an account?" : "Already have an account?"}
-                                            <button
-                                                onClick={() => toggleMode(mode === 'login' ? 'register' : 'login')}
-                                                className="ml-2 text-black font-bold hover:underline focus:outline-none"
-                                            >
-                                                {mode === 'login' ? 'Register' : 'Login'}
-                                            </button>
-                                        </p>
-                                    )}
+                                    <button
+                                        onClick={() => toggleMode('login')}
+                                        className="text-slate-500 text-sm hover:text-slate-900 font-medium flex items-center justify-center gap-2 mx-auto transition-colors"
+                                    >
+                                        <ArrowLeft size={16} /> Back to Login
+                                    </button>
                                 </div>
                             )}
                         </>
