@@ -34,7 +34,7 @@ export const sendEmail = async (payload: SendEmailPayload): Promise<EmailResult>
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (key) headers['Authorization'] = `Bearer ${key}`;
     try {
-        const res = await fetch(emailEndpoint(), { method: 'POST', headers, body: JSON.stringify(payload) });
+        const res = await fetch(emailEndpoint(), { method: 'POST', headers, credentials: 'include', body: JSON.stringify(payload) });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
             return { success: false, message: data.error || `Email failed (HTTP ${res.status}).` };

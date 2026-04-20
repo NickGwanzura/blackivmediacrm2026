@@ -3,6 +3,7 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Invoice, Contract, Client, Billboard, MaintenanceLog, PrintingJob, Expense } from '../types';
 import { getCompanyProfile, getCompanyLogo } from './mockData';
+import { toast } from '../components/Toast';
 
 // Colors
 const COLOR_PRIMARY = [15, 23, 42]; // Slate 900
@@ -208,7 +209,7 @@ export const generateProfitAnalyticsPDF = (
         doc.save(`Profit_Analytics_${new Date().toISOString().slice(0,10)}.pdf`);
     } catch(e) {
         console.error(e);
-        alert("Failed to generate analytics report.");
+        toast.error("Failed to generate analytics report.");
     }
 };
 
@@ -254,7 +255,7 @@ export const generateActiveRentalsPDF = (contracts: Contract[], getClientName: a
         doc.save(`Active_Rentals_${new Date().toISOString().slice(0,10)}.pdf`);
     } catch(e) {
         console.error(e);
-        alert("Failed to generate rentals report.");
+        toast.error("Failed to generate rentals report.");
     }
 };
 
@@ -287,7 +288,7 @@ export const generatePaymentSchedulePDF = (schedule: any[]) => {
 
         addFooter(doc, 1);
         doc.save(`Payment_Schedule_${new Date().toISOString().slice(0,10)}.pdf`);
-    } catch(e) { console.error(e); alert("Failed to generate schedule."); }
+    } catch(e) { console.error(e); toast.error("Failed to generate schedule."); }
 };
 
 // 4. Received Payments History
@@ -326,7 +327,7 @@ export const generateReceivedPaymentsPDF = (receipts: Invoice[], getClientName: 
 
         addFooter(doc, 1);
         doc.save(`Received_Payments_${new Date().toISOString().slice(0,10)}.pdf`);
-    } catch(e) { console.error(e); alert("Failed to generate report."); }
+    } catch(e) { console.error(e); toast.error("Failed to generate report."); }
 };
 
 // 5. Active Clients Report
@@ -358,7 +359,7 @@ export const generateActiveClientsPDF = (clients: Client[]) => {
 
         addFooter(doc, 1);
         doc.save(`Active_Clients_${new Date().toISOString().slice(0,10)}.pdf`);
-    } catch(e) { console.error(e); alert("Failed to generate report."); }
+    } catch(e) { console.error(e); toast.error("Failed to generate report."); }
 };
 
 export const generateInvoicePDF = (invoice: Invoice, client: Client, options?: PdfOutputOptions): PdfBase64 | void => {
@@ -472,7 +473,7 @@ export const generateInvoicePDF = (invoice: Invoice, client: Client, options?: P
     return finalizePdf(doc, `${invoice.type}_${invoice.id}.pdf`, options);
   } catch (error) {
     console.error("PDF Generation Error:", error);
-    if (!options?.asBase64) alert("Failed to generate PDF. Please check console for details.");
+    if (!options?.asBase64) toast.error("Failed to generate PDF. Please check console for details.");
     return;
   }
 };
@@ -586,7 +587,7 @@ export const generateMasterContractPDF = (contracts: Contract[], client: Client,
 
     } catch (e) {
         console.error("PDF Generation Error", e);
-        alert("Failed to generate Master Contract.");
+        toast.error("Failed to generate Master Contract.");
     }
 };
 
@@ -657,7 +658,7 @@ export const generateContractsReportPDF = (contracts: Contract[], getClientName:
         doc.save(`Contracts_Report_${new Date().toISOString().slice(0,10)}.pdf`);
     } catch (e) {
         console.error("Report Generation Failed", e);
-        alert("Failed to generate contracts report.");
+        toast.error("Failed to generate contracts report.");
     }
 };
 
@@ -781,7 +782,7 @@ export const generateContractPDF = (contract: Contract, client: Client, billboar
     return finalizePdf(doc, `Contract_${contract.id}.pdf`, options);
   } catch (error) {
     console.error("PDF Generation Error:", error);
-    if (!options?.asBase64) alert("Failed to generate Contract PDF.");
+    if (!options?.asBase64) toast.error("Failed to generate Contract PDF.");
     return;
   }
 };
@@ -893,7 +894,7 @@ export const generateStatementPDF = (client: Client, transactions: Invoice[], ac
         return finalizePdf(doc, `Statement_${client.companyName.replace(/\s/g, '_')}.pdf`, options);
     } catch (error) {
         console.error("PDF Generation Error:", error);
-        if (!options?.asBase64) alert("Failed to generate Statement PDF.");
+        if (!options?.asBase64) toast.error("Failed to generate Statement PDF.");
         return;
     }
 };
@@ -969,7 +970,7 @@ export const generateMaintenanceReportPDF = (billboards: Billboard[], logs: Main
         doc.save(`Maintenance_Report_${new Date().toISOString().slice(0,10)}.pdf`);
     } catch(e) {
         console.error("Report Generation Failed", e);
-        alert("Failed to generate maintenance report.");
+        toast.error("Failed to generate maintenance report.");
     }
 };
 
@@ -1084,7 +1085,7 @@ export const generateFeaturesPDF = () => {
         doc.save('System_Features_Documentation.pdf');
     } catch (error) {
         console.error("PDF Generation Error:", error);
-        alert("Failed to generate Features PDF.");
+        toast.error("Failed to generate Features PDF.");
     }
 };
 
@@ -1198,7 +1199,7 @@ export const generateCostReportPDF = (clients: Client[], printingJobs: PrintingJ
 
     } catch(e) {
         console.error("Report Generation Failed", e);
-        alert("Failed to generate cost report.");
+        toast.error("Failed to generate cost report.");
     }
 };
 

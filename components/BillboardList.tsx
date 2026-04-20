@@ -44,13 +44,16 @@ interface BillboardCardProps {
   onShare: (b: Billboard) => void;
   selected: boolean;
   onSelect: (id: string) => void;
+  readOnly?: boolean;
 }
 
-const BillboardCard: React.FC<BillboardCardProps> = ({ billboard, onEdit, onDelete, getClientName, onShare, selected, onSelect }) => (
+const BillboardCard: React.FC<BillboardCardProps> = ({ billboard, onEdit, onDelete, getClientName, onShare, selected, onSelect, readOnly = false }) => (
     <div className={`group bg-white rounded-3xl shadow-sm hover:shadow-2xl hover:shadow-slate-200/50 transition-all duration-500 overflow-hidden flex flex-col h-full hover:-translate-y-1 relative ${selected ? 'ring-2 ring-indigo-500 ring-offset-2' : 'border border-slate-100'}`}>
-        <div className="absolute top-4 left-4 z-20" onClick={(e) => e.stopPropagation()}>
-             <Checkbox checked={selected} onChange={() => onSelect(billboard.id)} className="shadow-md" />
-        </div>
+        {!readOnly && (
+          <div className="absolute top-4 left-4 z-20" onClick={(e) => e.stopPropagation()}>
+               <Checkbox checked={selected} onChange={() => onSelect(billboard.id)} className="shadow-md" />
+          </div>
+        )}
         <div className="h-56 bg-slate-200 relative overflow-hidden shrink-0">
             {billboard.imageUrl ? (
                 <img src={billboard.imageUrl} alt="Billboard" className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"/>
@@ -106,15 +109,25 @@ const BillboardCard: React.FC<BillboardCardProps> = ({ billboard, onEdit, onDele
             )}
             
             <div className="mt-auto flex gap-3">
-                <button onClick={() => onEdit(billboard)} className="flex-1 px-4 py-3 text-xs font-bold uppercase tracking-wider text-slate-600 bg-white border border-slate-200 hover:border-slate-300 hover:bg-slate-50 rounded-xl transition-all flex items-center justify-center gap-2 shadow-sm"><Edit2 size={14} /> Edit</button>
-                <button onClick={() => onShare(billboard)} className="px-3 py-3 text-indigo-600 bg-indigo-50 border border-indigo-100 hover:bg-indigo-100 rounded-xl transition-all flex items-center justify-center shadow-sm" title="Share Billboard Link"><Link2 size={16} /></button>
-                <button onClick={() => onDelete(billboard)} className="px-3 py-3 text-red-500 bg-red-50 border border-red-100 hover:bg-red-100 hover:border-red-200 rounded-xl transition-all flex items-center justify-center shadow-sm" title="Delete Asset"><Trash2 size={16} /></button>
+                {!readOnly && <button onClick={() => onEdit(billboard)} className="flex-1 px-4 py-3 text-xs font-bold uppercase tracking-wider text-slate-600 bg-white border border-slate-200 hover:border-slate-300 hover:bg-slate-50 rounded-xl transition-all flex items-center justify-center gap-2 shadow-sm"><Edit2 size={14} /> Edit</button>}
+                <button onClick={() => onShare(billboard)} className={`${readOnly ? 'flex-1' : ''} px-3 py-3 text-indigo-600 bg-indigo-50 border border-indigo-100 hover:bg-indigo-100 rounded-xl transition-all flex items-center justify-center gap-2 shadow-sm`} title="Share Billboard Link"><Link2 size={16} />{readOnly && <span className="text-xs font-bold uppercase tracking-wider">Share</span>}</button>
+                {!readOnly && <button onClick={() => onDelete(billboard)} className="px-3 py-3 text-red-500 bg-red-50 border border-red-100 hover:bg-red-100 hover:border-red-200 rounded-xl transition-all flex items-center justify-center shadow-sm" title="Delete Asset"><Trash2 size={16} /></button>}
             </div>
         </div>
     </div>
 );
 
-export const BillboardList: React.FC = () => {
+interface BillboardListProps {
+  /**
+   * When true the component renders in a public/read-only mode: no Add /
+   * Edit / Delete buttons, no import/export, no Maintenance entry points.
+   * Used by the public `?view=map` / `?billboardId=` share links where the
+   * visitor is not authenticated.
+   */
+  readOnly?: boolean;
+}
+
+export const BillboardList: React.FC<BillboardListProps> = ({ readOnly = false }) => {
   const toast = useToast();
   const [billboards, setBillboards] = useState<Billboard[]>(getBillboards());
   const [filter, setFilter] = useState<'All' | 'Static' | 'LED'>('All');
@@ -514,13 +527,15 @@ export const BillboardList: React.FC = () => {
                     <button onClick={() => setViewMode('map')} className={`p-2.5 rounded-full transition-all ${viewMode === 'map' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400 hover:text-slate-900'}`} title="Map View"><MapIcon size={18} /></button>
                 </div>
                 
-                <div className="flex bg-white/80 backdrop-blur-sm rounded-full border border-slate-200 p-1 shadow-sm hidden xl:flex">
-                    <button onClick={downloadTemplate} className="p-2.5 rounded-full text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all" title="Download CSV Template"><FileDown size={18}/></button>
-                    <label className={`p-2.5 rounded-full transition-all cursor-pointer ${isImporting ? 'text-indigo-600 bg-indigo-50 animate-pulse cursor-wait' : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'}`} title="Import Billboards CSV">
-                        {isImporting ? <Loader2 size={18} className="animate-spin"/> : <FileUp size={18}/>}
-                        <input type="file" ref={importInputRef} accept=".csv" className="hidden" onChange={handleImportBillboards} disabled={isImporting} />
-                    </label>
-                </div>
+                {!readOnly && (
+                  <div className="flex bg-white/80 backdrop-blur-sm rounded-full border border-slate-200 p-1 shadow-sm hidden xl:flex">
+                      <button onClick={downloadTemplate} className="p-2.5 rounded-full text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all" title="Download CSV Template"><FileDown size={18}/></button>
+                      <label className={`p-2.5 rounded-full transition-all cursor-pointer ${isImporting ? 'text-indigo-600 bg-indigo-50 animate-pulse cursor-wait' : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'}`} title="Import Billboards CSV">
+                          {isImporting ? <Loader2 size={18} className="animate-spin"/> : <FileUp size={18}/>}
+                          <input type="file" ref={importInputRef} accept=".csv" className="hidden" onChange={handleImportBillboards} disabled={isImporting} />
+                      </label>
+                  </div>
+                )}
 
                 <div className="flex flex-col sm:flex-row gap-2 bg-white/80 backdrop-blur-sm rounded-[2rem] sm:rounded-full border border-slate-200 p-1 shadow-sm">
                     <div className="flex">
@@ -540,7 +555,7 @@ export const BillboardList: React.FC = () => {
                 </div>
 
                 <button onClick={() => setIsMapShareModalOpen(true)} className="bg-white text-slate-600 p-3 rounded-full hover:bg-slate-50 border border-slate-200 transition-colors shadow-sm hover:shadow-md hidden sm:block" title="Share Map"><Share2 size={20} /></button>
-                <button onClick={() => setIsAddModalOpen(true)} className="bg-gradient-to-r from-indigo-600 to-violet-600 text-white p-3 rounded-full hover:shadow-lg hover:shadow-indigo-500/30 transition-all hover:scale-105 active:scale-95" title="Add Billboard"><Plus size={20} /></button>
+                {!readOnly && <button onClick={() => setIsAddModalOpen(true)} className="bg-gradient-to-r from-indigo-600 to-violet-600 text-white p-3 rounded-full hover:shadow-lg hover:shadow-indigo-500/30 transition-all hover:scale-105 active:scale-95" title="Add Billboard"><Plus size={20} /></button>}
              </div>
           </div>
         </div>
@@ -552,11 +567,11 @@ export const BillboardList: React.FC = () => {
                   <div className="overflow-x-auto">
                       <table className="w-full text-left text-sm text-slate-600 min-w-[800px]">
                           <thead className="bg-slate-50/80 border-b border-slate-200 sticky top-0 z-10 backdrop-blur-md"><tr><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider w-16"><Checkbox checked={selectedIds.length === filteredBillboards.length && filteredBillboards.length > 0} onChange={handleSelectAll} /></th><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider">Asset</th><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider">Location</th><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider">Type</th><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider">Status</th><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider">Rate</th><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider text-right">Actions</th></tr></thead>
-                          <tbody className="divide-y divide-slate-100">{filteredBillboards.map(b => (<tr key={b.id} className="hover:bg-indigo-50/30 transition-colors"><td className="px-6 py-4"><Checkbox checked={selectedIds.includes(b.id)} onChange={() => handleSelect(b.id)} /></td><td className="px-6 py-4 flex items-center gap-4"><div className="w-14 h-14 rounded-xl bg-slate-100 overflow-hidden shrink-0 border border-slate-200 shadow-sm">{b.imageUrl ? <img src={b.imageUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-slate-300"><ImageIcon size={20}/></div>}</div><span className="font-bold text-slate-900 text-base">{b.name}</span></td><td className="px-6 py-4"><div className="text-slate-800 font-bold">{b.town}</div><div className="text-xs text-slate-500 font-medium">{b.location}</div></td><td className="px-6 py-4"><span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider ${b.type === 'LED' ? 'bg-indigo-100 text-indigo-700' : 'bg-orange-100 text-orange-700'}`}>{b.type}</span></td><td className="px-6 py-4">{b.type === BillboardType.Static ? (<div className="flex gap-2"><div className={`px-2.5 py-1 rounded-lg text-xs font-bold ${b.sideAStatus === 'Available' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>A</div><div className={`px-2.5 py-1 rounded-lg text-xs font-bold ${b.sideBStatus === 'Available' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>B</div></div>) : (<div className="flex items-center gap-2"><div className="h-2 w-20 bg-slate-100 rounded-full overflow-hidden border border-slate-200"><div className="h-full bg-gradient-to-r from-indigo-500 to-violet-500" style={{width: `${(b.rentedSlots! / b.totalSlots!) * 100}%`}}></div></div><span className="text-xs font-bold">{b.rentedSlots}/{b.totalSlots}</span></div>)}</td><td className="px-6 py-4 font-mono text-xs font-bold text-slate-700">{b.type === BillboardType.Static ? `$${b.sideARate} | $${b.sideBRate}` : `$${b.ratePerSlot}/slot`}</td><td className="px-6 py-4 text-right"><div className="flex justify-end gap-2"><button onClick={() => setEditingBillboard(b)} className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-all"><Edit2 size={16}/></button><button onClick={() => shareBillboard(b)} className="p-2 text-indigo-400 hover:text-indigo-900 hover:bg-indigo-50 rounded-xl transition-all"><Link2 size={16}/></button><button onClick={() => setBillboardToDelete(b)} className="p-2 text-rose-400 hover:text-rose-900 hover:bg-rose-50 rounded-xl transition-all"><Trash2 size={16}/></button></div></td></tr>))}</tbody></table></div></div>
+                          <tbody className="divide-y divide-slate-100">{filteredBillboards.map(b => (<tr key={b.id} className="hover:bg-indigo-50/30 transition-colors"><td className="px-6 py-4"><Checkbox checked={selectedIds.includes(b.id)} onChange={() => handleSelect(b.id)} /></td><td className="px-6 py-4 flex items-center gap-4"><div className="w-14 h-14 rounded-xl bg-slate-100 overflow-hidden shrink-0 border border-slate-200 shadow-sm">{b.imageUrl ? <img src={b.imageUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-slate-300"><ImageIcon size={20}/></div>}</div><span className="font-bold text-slate-900 text-base">{b.name}</span></td><td className="px-6 py-4"><div className="text-slate-800 font-bold">{b.town}</div><div className="text-xs text-slate-500 font-medium">{b.location}</div></td><td className="px-6 py-4"><span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider ${b.type === 'LED' ? 'bg-indigo-100 text-indigo-700' : 'bg-orange-100 text-orange-700'}`}>{b.type}</span></td><td className="px-6 py-4">{b.type === BillboardType.Static ? (<div className="flex gap-2"><div className={`px-2.5 py-1 rounded-lg text-xs font-bold ${b.sideAStatus === 'Available' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>A</div><div className={`px-2.5 py-1 rounded-lg text-xs font-bold ${b.sideBStatus === 'Available' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>B</div></div>) : (<div className="flex items-center gap-2"><div className="h-2 w-20 bg-slate-100 rounded-full overflow-hidden border border-slate-200"><div className="h-full bg-gradient-to-r from-indigo-500 to-violet-500" style={{width: `${(b.rentedSlots! / b.totalSlots!) * 100}%`}}></div></div><span className="text-xs font-bold">{b.rentedSlots}/{b.totalSlots}</span></div>)}</td><td className="px-6 py-4 font-mono text-xs font-bold text-slate-700">{b.type === BillboardType.Static ? `$${b.sideARate} | $${b.sideBRate}` : `$${b.ratePerSlot}/slot`}</td><td className="px-6 py-4 text-right"><div className="flex justify-end gap-2">{!readOnly && <button onClick={() => setEditingBillboard(b)} className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-all"><Edit2 size={16}/></button>}<button onClick={() => shareBillboard(b)} className="p-2 text-indigo-400 hover:text-indigo-900 hover:bg-indigo-50 rounded-xl transition-all"><Link2 size={16}/></button>{!readOnly && <button onClick={() => setBillboardToDelete(b)} className="p-2 text-rose-400 hover:text-rose-900 hover:bg-rose-50 rounded-xl transition-all"><Trash2 size={16}/></button>}</div></td></tr>))}</tbody></table></div></div>
           ) : (
             <div className="pb-8 overflow-y-auto max-h-full pr-2">
-                {(filter === 'All' || filter === 'LED') && ledBoards.length > 0 && (<div className="mb-12"><h3 className="text-2xl font-bold text-slate-900 mb-6 flex items-center gap-3"><span className="w-1.5 h-8 bg-gradient-to-b from-indigo-500 to-violet-600 rounded-full shadow-lg shadow-indigo-500/30"></span>Digital Inventory <span className="text-sm font-bold text-slate-500 bg-white border border-slate-200 px-3 py-1 rounded-lg ml-2 shadow-sm">{ledBoards.length}</span></h3><div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">{ledBoards.map(billboard => (<BillboardCard key={billboard.id} billboard={billboard} onEdit={setEditingBillboard} onDelete={setBillboardToDelete} getClientName={getClientName} onShare={shareBillboard} selected={selectedIds.includes(billboard.id)} onSelect={handleSelect} />))}</div></div>)}
-                {(filter === 'All' || filter === 'Static') && staticBoards.length > 0 && (<div className="mb-12"><h3 className="text-2xl font-bold text-slate-900 mb-6 flex items-center gap-3"><span className="w-1.5 h-8 bg-gradient-to-b from-orange-400 to-red-500 rounded-full shadow-lg shadow-orange-500/30"></span>Static Inventory <span className="text-sm font-bold text-slate-500 bg-white border border-slate-200 px-3 py-1 rounded-lg ml-2 shadow-sm">{staticBoards.length}</span></h3><div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">{staticBoards.map(billboard => (<BillboardCard key={billboard.id} billboard={billboard} onEdit={setEditingBillboard} onDelete={setBillboardToDelete} getClientName={getClientName} onShare={shareBillboard} selected={selectedIds.includes(billboard.id)} onSelect={handleSelect} />))}</div></div>)}
+                {(filter === 'All' || filter === 'LED') && ledBoards.length > 0 && (<div className="mb-12"><h3 className="text-2xl font-bold text-slate-900 mb-6 flex items-center gap-3"><span className="w-1.5 h-8 bg-gradient-to-b from-indigo-500 to-violet-600 rounded-full shadow-lg shadow-indigo-500/30"></span>Digital Inventory <span className="text-sm font-bold text-slate-500 bg-white border border-slate-200 px-3 py-1 rounded-lg ml-2 shadow-sm">{ledBoards.length}</span></h3><div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">{ledBoards.map(billboard => (<BillboardCard key={billboard.id} billboard={billboard} onEdit={setEditingBillboard} onDelete={setBillboardToDelete} getClientName={getClientName} onShare={shareBillboard} selected={selectedIds.includes(billboard.id)} onSelect={handleSelect} readOnly={readOnly} />))}</div></div>)}
+                {(filter === 'All' || filter === 'Static') && staticBoards.length > 0 && (<div className="mb-12"><h3 className="text-2xl font-bold text-slate-900 mb-6 flex items-center gap-3"><span className="w-1.5 h-8 bg-gradient-to-b from-orange-400 to-red-500 rounded-full shadow-lg shadow-orange-500/30"></span>Static Inventory <span className="text-sm font-bold text-slate-500 bg-white border border-slate-200 px-3 py-1 rounded-lg ml-2 shadow-sm">{staticBoards.length}</span></h3><div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">{staticBoards.map(billboard => (<BillboardCard key={billboard.id} billboard={billboard} onEdit={setEditingBillboard} onDelete={setBillboardToDelete} getClientName={getClientName} onShare={shareBillboard} selected={selectedIds.includes(billboard.id)} onSelect={handleSelect} readOnly={readOnly} />))}</div></div>)}
                 {filteredBillboards.length === 0 && (<div className="text-center py-32 bg-white/50 rounded-[3rem] border border-dashed border-slate-200 backdrop-blur-sm"><p className="text-slate-400 font-medium text-lg">No billboards found matching this filter.</p></div>)}
             </div>
           )}
@@ -564,7 +579,7 @@ export const BillboardList: React.FC = () => {
       </div>
       
       {/* Batch Actions Toolbar */}
-      {selectedIds.length > 0 && (
+      {!readOnly && selectedIds.length > 0 && (
           <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[100] animate-fade-in flex items-center gap-2 bg-white/80 backdrop-blur-xl border border-slate-200 shadow-2xl p-2 rounded-2xl ring-1 ring-black/5">
               <div className="pl-4 pr-3 py-2 border-r border-slate-200/50">
                   <span className="text-xs font-bold uppercase tracking-wider text-slate-500 mr-1">Selected</span>
