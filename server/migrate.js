@@ -45,6 +45,11 @@ const STATEMENTS = [
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_expires TIMESTAMPTZ`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`,
+  // Monotonic per-user counter used to invalidate outstanding session
+  // cookies after a password change / reset. Each session JWT carries the
+  // epoch it was issued against; requireAuth rejects tokens whose epoch is
+  // stale.
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS session_epoch INTEGER NOT NULL DEFAULT 1`,
   // Email uniqueness is important for login. Add a unique index if not present.
   `CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique_lower ON users (LOWER(email))`,
 ];

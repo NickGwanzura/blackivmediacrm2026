@@ -553,6 +553,10 @@ function createAuthRouter({ resendClient, getCompanyName }) {
 // ---- Initial admin bootstrap (invoked once at server startup) ----
 async function ensureInitialAdmin() {
   try {
+    // Only seed if the users table is empty — avoids racing across parallel
+    // replicas during boot. The ON CONFLICT below provides the actual
+    // race-safety guarantee; this check just avoids logging a fresh password
+    // into stdout every boot.
     const rows = await sql`SELECT COUNT(*)::int AS n FROM users`;
     const n = rows && rows[0] ? rows[0].n : 0;
     if (n > 0) return;
@@ -567,11 +571,22 @@ async function ensureInitialAdmin() {
     const password = genTempPassword();
     const hash = await bcrypt.hash(password, BCRYPT_COST);
     const id = `usr_admin_${Date.now()}`;
-    await sql.query(
+    // Single-statement INSERT ... ON CONFLICT DO NOTHING RETURNING id.
+    // Only the replica that actually wins the insert will get a row back,
+    // so only that one logs the password — avoids stale password lines in
+    // sibling container logs when multiple replicas race at boot.
+    const inserted = await sql.query(
       `INSERT INTO users (id, first_name, last_name, email, role, password, status, must_change_password, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8, NOW(), NOW())`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8, NOW(), NOW())
+       ON CONFLICT (LOWER(email)) DO NOTHING
+       RETURNING id`,
       [id, 'Admin', 'User', email, 'Admin', hash, 'Active', true],
     );
+    const createdRow = Array.isArray(inserted) ? inserted[0] : (inserted && inserted.rows ? inserted.rows[0] : null);
+    if (!createdRow) {
+      // Another replica (or a previous boot) seeded the admin. Silent success.
+      return;
+    }
     // Print once, prominently. Operators should grab this from stdout on first boot.
     console.log('==================================================================');
     console.log(`========== INITIAL ADMIN PASSWORD: ${password} ==========`);

@@ -115,12 +115,16 @@ app.get('/sync/all', requireAuth, async (_req, res) => {
     const rows = await sql`SELECT key, value FROM app_data`;
     const out = {};
     for (const r of rows) out[r.key] = r.value;
-    if (out.users && Array.isArray(out.users)) {
-      out.users = out.users.map((u) => {
-        if (!u || typeof u !== 'object') return u;
-        const { password, password_reset_token, password_reset_expires, ...rest } = u;
-        return rest;
-      });
+    const stripUser = (u) => {
+      if (!u || typeof u !== 'object') return u;
+      const { password, password_reset_token, password_reset_expires, ...rest } = u;
+      return rest;
+    };
+    if (Array.isArray(out.users)) {
+      out.users = out.users.map(stripUser);
+    } else if (out.users && typeof out.users === 'object') {
+      // Legacy blob wrote users as an object keyed by id. Strip either way.
+      out.users = Object.fromEntries(Object.entries(out.users).map(([k, v]) => [k, stripUser(v)]));
     }
     res.json(out);
   } catch (e) {
