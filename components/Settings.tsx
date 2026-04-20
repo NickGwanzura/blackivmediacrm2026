@@ -1,81 +1,186 @@
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useToast } from './Toast';
-import { getUsers, addUser, updateUser, deleteUser, findUserByEmail, getAuditLogs, getCompanyLogo, setCompanyLogo, getCompanyProfile, updateCompanyProfile, RELEASE_NOTES, resetSystemData, createSystemBackup, restoreSystemBackup, getLastManualBackupDate, getAutoBackupStatus, getStorageUsage, recordCloudSync, getLastCloudSyncDate, downloadSQL, getApiConfig, setApiConfig, pullFromRemote, forcePushToRemote, validateConnection, downloadServerCode, downloadPackageJson, downloadEnvFile } from '../services/mockData';
+import { getUsers, addUser, updateUser, deleteUser, getAuditLogs, fetchServerAuditLogs, getCompanyLogo, setCompanyLogo, getCompanyProfile, updateCompanyProfile, RELEASE_NOTES, resetSystemData, createSystemBackup, restoreSystemBackup, getLastManualBackupDate, getAutoBackupStatus, getStorageUsage, recordCloudSync, getLastCloudSyncDate, getApiConfig, setApiConfig, pullFromRemote, forcePushToRemote, validateConnection, getLastSyncedAt } from '../services/mockData';
 import { generateFeaturesPDF } from '../services/pdfGenerator';
-import { emailUserInvite } from '../services/emailService';
 import { getCurrentUser, approveUser as approveUserApi, inviteUser as inviteUserApi, requestPasswordReset } from '../services/authService';
-import { User, Shield, Building, ScrollText, Download, Plus, X, Save, Phone, MapPin, Edit2, Trash2, AlertTriangle, Cloud, Upload, History, RefreshCw, Database, FileUp, FileDown, Clock, Archive, HardDrive, BookOpen, CheckCircle, Loader2, Smartphone, Monitor, Server, FileCode, Code, Link2, Terminal, Info, ExternalLink, Package, Key, Hash, Eye, EyeOff, Globe, Network, ShieldCheck, Wifi, FileText, ArrowUpCircle, UserCheck, Mail, Send, KeyRound } from 'lucide-react';
+import { Shield, Download, X, Save, Phone, MapPin, Edit2, Trash2, AlertTriangle, Cloud, Upload, History, RefreshCw, Database, FileUp, FileDown, Clock, HardDrive, BookOpen, Loader2, Smartphone, Monitor, Code, Eye, EyeOff, Wifi, FileText, ArrowUpCircle, UserCheck, Mail, Send, KeyRound, Building, ScrollText, Lock } from 'lucide-react';
 import { User as UserType, CompanyProfile } from '../types';
+// Import the canonical schema at build time so the UI can't drift from what
+// the server actually runs. Vite's `?raw` inlines the file contents as a
+// string; any change to server/schema.sql is reflected here on next build.
+// @ts-expect-error: `?raw` suffix is a Vite-specific loader
+import SQL_SCRIPT from '../server/schema.sql?raw';
 
-const genTempPassword = (length = 16): string => {
-  const charset = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%&*';
-  const bytes = new Uint32Array(length);
-  (globalThis.crypto || (window as any).crypto).getRandomValues(bytes);
-  let pw = '';
-  for (let i = 0; i < length; i++) pw += charset[bytes[i] % charset.length];
-  if (!/[A-Z]/.test(pw)) pw = 'A' + pw.slice(1);
-  if (!/[0-9]/.test(pw)) pw = pw.slice(0, -1) + '7';
-  return pw;
-};
+type InputChange = (e: React.ChangeEvent<HTMLInputElement>) => void;
+type SelectChange = (e: React.ChangeEvent<HTMLSelectElement>) => void;
 
-const MinimalInput = ({ label, value, onChange, type = "text", required = false, placeholder = "" }: any) => (
+interface MinimalInputProps {
+  label: string;
+  value: string | number | undefined;
+  onChange: InputChange;
+  type?: string;
+  required?: boolean;
+  placeholder?: string;
+}
+const MinimalInput: React.FC<MinimalInputProps> = ({ label, value, onChange, type = "text", required = false }) => (
   <div className="group relative">
-    <input type={type} required={required} value={value} onChange={onChange} placeholder=" " className="peer w-full px-0 py-2.5 border-b border-slate-200 bg-transparent text-slate-800 focus:border-slate-800 focus:ring-0 outline-none transition-all font-medium placeholder-transparent" />
+    <input type={type} required={required} value={value ?? ''} onChange={onChange} placeholder=" " className="peer w-full px-0 py-2.5 border-b border-slate-200 bg-transparent text-slate-800 focus:border-slate-800 focus:ring-0 outline-none transition-all font-medium placeholder-transparent" />
     <label className="absolute left-0 -top-2.5 text-xs text-slate-400 font-medium transition-all peer-placeholder-shown:text-sm peer-placeholder-shown:text-slate-400 peer-placeholder-shown:top-2.5 peer-focus:-top-2.5 peer-focus:text-xs peer-focus:text-slate-800 uppercase tracking-wide">{label}</label>
   </div>
 );
-const MinimalSelect = ({ label, value, onChange, options }: any) => (
+
+interface SelectOption { value: string; label: string; }
+interface MinimalSelectProps {
+  label: string;
+  value: string;
+  onChange: SelectChange;
+  options: SelectOption[];
+}
+const MinimalSelect: React.FC<MinimalSelectProps> = ({ label, value, onChange, options }) => (
   <div className="group relative">
     <select value={value} onChange={onChange} className="peer w-full px-0 py-2.5 border-b border-slate-200 bg-transparent text-slate-800 focus:border-slate-800 focus:ring-0 outline-none transition-all font-medium appearance-none cursor-pointer">
-      {options.map((opt: any) => (<option key={opt.value} value={opt.value}>{opt.label}</option>))}
+      {options.map(opt => (<option key={opt.value} value={opt.value}>{opt.label}</option>))}
     </select>
     <label className="absolute left-0 -top-2.5 text-xs text-slate-400 font-medium uppercase tracking-wide">{label}</label>
   </div>
 );
 
+// RFC 4180 + formula-injection guard for CSV export. Spreadsheet apps
+// (Excel, LibreOffice) treat cells starting with =, +, -, @ as formulas,
+// which can leak data or run external content. Prefix with a single quote
+// to neutralize, and always double-quote + escape embedded quotes.
+const csvEscape = (raw: unknown): string => {
+  const s = raw === null || raw === undefined ? '' : String(raw);
+  const safe = /^[=+\-@\t\r]/.test(s) ? "'" + s : s;
+  return `"${safe.replace(/"/g, '""')}"`;
+};
+
 export const Settings: React.FC = () => {
   const toast = useToast();
+  const currentUser = getCurrentUser();
+  const isAdmin = currentUser?.role === 'Admin';
   const [activeTab, setActiveTab] = useState<'General' | 'Audit' | 'Data' | 'SQL' | 'ReleaseNotes' | 'Features'>('General');
   const [users, setUsers] = useState<UserType[]>(getUsers());
-  const auditLogs = getAuditLogs();
   const [logoPreview, setLogoPreview] = useState(getCompanyLogo());
   const [profile, setProfile] = useState<CompanyProfile>(getCompanyProfile());
+  const [profileDirty, setProfileDirty] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<UserType | null>(null);
   const [userToDelete, setUserToDelete] = useState<UserType | null>(null);
   const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
-  const [newUser, setNewUser] = useState<Partial<UserType>>({ firstName: '', lastName: '', email: '', role: 'Staff', password: '' });
-  const [passwordError, setPasswordError] = useState('');
+  const [resetConfirmText, setResetConfirmText] = useState('');
   const [inviteForm, setInviteForm] = useState<{ firstName: string; lastName: string; email: string; role: UserType['role'] }>({ firstName: '', lastName: '', email: '', role: 'Staff' });
   const [inviteError, setInviteError] = useState('');
   const [inviteSending, setInviteSending] = useState(false);
   const [resendingUserId, setResendingUserId] = useState<string | null>(null);
-  const currentUser = getCurrentUser();
-  const isAdmin = currentUser?.role === 'Admin';
   const [backupStatus, setBackupStatus] = useState({ manual: getLastManualBackupDate(), auto: getAutoBackupStatus(), storage: getStorageUsage(), cloud: getLastCloudSyncDate() });
   const [isSyncing, setIsSyncing] = useState(false);
-  
+
   // SQL/API State
   const [apiConfig, setApiConfigState] = useState(getApiConfig());
   const [isPulling, setIsPulling] = useState(false);
   const [isPushing, setIsPushing] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
+  // 'unknown' until we verify against /health/db; stays on 'verified' after
+  // a successful check so the LED reflects real health rather than a guess.
+  const [connectionHealth, setConnectionHealth] = useState<'unknown' | 'verified' | 'error' | 'disconnected'>(
+      apiConfig.url ? 'unknown' : 'disconnected'
+  );
+  const [lastSynced, setLastSynced] = useState<string | null>(getLastSyncedAt());
+
+  // Audit logs are now server-authoritative. Fetch the most recent 500 from
+  // /audit/log (Admin-only endpoint) when the Audit tab opens; fall back to
+  // the localStorage mirror if the network is unreachable.
+  const [auditLogs, setAuditLogs] = useState<ReturnType<typeof getAuditLogs>>([]);
+  const [auditLoading, setAuditLoading] = useState(false);
+  useEffect(() => {
+    if (activeTab !== 'Audit' || !isAdmin) return;
+    let cancelled = false;
+    setAuditLoading(true);
+    fetchServerAuditLogs(500)
+      .then(logs => {
+        if (cancelled) return;
+        // If the server returns nothing (e.g. offline), fall back to the
+        // local mirror rather than rendering an empty table.
+        setAuditLogs(logs.length > 0 ? logs : getAuditLogs());
+      })
+      .finally(() => { if (!cancelled) setAuditLoading(false); });
+    return () => { cancelled = true; };
+  }, [activeTab, isAdmin]);
 
   useEffect(() => {
       // Refresh backup status when entering Data tab
       if (activeTab === 'Data') {
-          setBackupStatus({ 
-              manual: getLastManualBackupDate(), 
-              auto: getAutoBackupStatus(), 
+          setBackupStatus({
+              manual: getLastManualBackupDate(),
+              auto: getAutoBackupStatus(),
               storage: getStorageUsage(),
               cloud: getLastCloudSyncDate()
           });
       }
-  }, [activeTab]);
+      // Auto-verify the Cloud Database connection when the user opens the
+      // SQL tab, so the LED reflects actual health instead of a stale guess.
+      if (activeTab === 'SQL' && apiConfig.url && connectionHealth === 'unknown') {
+          let cancelled = false;
+          (async () => {
+              const result = await validateConnection(apiConfig.url, apiConfig.key);
+              if (cancelled) return;
+              setConnectionHealth(result.success ? 'verified' : 'error');
+          })();
+          return () => { cancelled = true; };
+      }
+  }, [activeTab, apiConfig.url, apiConfig.key, connectionHealth]);
+
+  // Warn on full-page unload if there are unsaved Company Profile edits.
+  // In-app tab switching is guarded separately in the tab button onClick.
+  useEffect(() => {
+      if (!profileDirty) return;
+      const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+      window.addEventListener('beforeunload', handler);
+      return () => window.removeEventListener('beforeunload', handler);
+  }, [profileDirty]);
+
+  const guardedSetTab = async (next: typeof activeTab) => {
+      if (next === activeTab) return;
+      if (profileDirty && activeTab === 'General') {
+          const leave = await toast.confirm({
+              title: 'Unsaved company profile changes',
+              message: 'You have unsaved changes to the Company Profile. Leave without saving?',
+              variant: 'danger',
+              confirmLabel: 'Discard changes'
+          });
+          if (!leave) return;
+          setProfile(getCompanyProfile());
+          setProfileDirty(false);
+      }
+      setActiveTab(next);
+  };
+
+  const updateProfileField = <K extends keyof CompanyProfile>(field: K, value: CompanyProfile[K]) => {
+      setProfile(prev => ({ ...prev, [field]: value }));
+      setProfileDirty(true);
+  };
+
+  // Server-side /auth/* enforces Admin for all sensitive settings mutations,
+  // but the client also hard-gates the whole module: non-Admins who reach
+  // this component (devtools, stale route, etc.) see an access-denied screen
+  // and cannot trigger /sync or resetSystemData from here.
+  if (!isAdmin) {
+    return (
+      <div className="max-w-md mx-auto mt-24 bg-white p-10 rounded-2xl shadow-sm border border-slate-100 text-center">
+        <div className="w-16 h-16 bg-amber-50 rounded-full flex items-center justify-center mx-auto mb-6 border-4 border-amber-100/50">
+          <Lock className="text-amber-600" size={28} />
+        </div>
+        <h2 className="text-2xl font-bold text-slate-900 mb-2">Administrator access required</h2>
+        <p className="text-sm text-slate-500 leading-relaxed">
+          The Settings module manages users, data, and backend connections. Only accounts with the <strong>Admin</strong> role can view or change these settings.
+        </p>
+      </div>
+    );
+  }
 
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
@@ -97,24 +202,41 @@ export const Settings: React.FC = () => {
 
   const handleSaveCompanyDetails = () => {
       updateCompanyProfile(profile);
+      setProfileDirty(false);
       toast.success("Company details updated successfully.");
   };
 
   const handleSaveApiConfig = async (e: React.FormEvent) => {
       e.preventDefault();
       setApiConfig(apiConfig.url, apiConfig.key);
+      setConnectionHealth('unknown');
 
-      // Auto-Test on Save
+      // Verify the new config against /health/db before touching data. If
+      // the server is wrong, fail loudly instead of silently writing to an
+      // unreachable host.
+      setIsVerifying(true);
+      const verified = await validateConnection(apiConfig.url, apiConfig.key);
+      setIsVerifying(false);
+
+      if (!verified.success) {
+          setConnectionHealth('error');
+          toast.error(`Connection saved, but verification failed at step: ${verified.step}\n${verified.message}`, "Verification Failed");
+          return;
+      }
+      setConnectionHealth('verified');
+
+      // Now pull fresh data. Reloading the page is the simplest way to let
+      // all views see the new state (components read from module-level store).
       setIsPulling(true);
       const result = await pullFromRemote(false);
       setIsPulling(false);
+      setLastSynced(getLastSyncedAt());
 
       if (result.success) {
-          toast.success("Connection saved & verified! Data synced successfully.");
-          const reload = await toast.confirm({ message: "Reload now to apply changes?", variant: 'default', confirmLabel: 'Reload' });
-          if (reload) window.location.reload();
+          toast.success("Connection verified and data synced. Reloading…");
+          setTimeout(() => window.location.reload(), 600);
       } else {
-          toast.error(`Connection saved, but sync failed:\n${result.message}\n\nPlease check your Server URL and ensure it's running.`, "Sync Failed");
+          toast.error(`Connection saved, but sync failed:\n${result.message}`, "Sync Failed");
       }
   };
 
@@ -124,11 +246,12 @@ export const Settings: React.FC = () => {
       setIsVerifying(true);
       const result = await validateConnection(apiConfig.url, apiConfig.key);
       setIsVerifying(false);
+      setConnectionHealth(result.success ? 'verified' : 'error');
 
       if (result.success) {
-          toast.success(`${result.message}\n\nThis connection is healthy and ready for sync.`, "Integrity Check Passed");
+          toast.success(`${result.message}`, "Connection verified");
       } else {
-          toast.error(`Failed at step: ${result.step}\n\nError: ${result.message}\n\nPlease verify your server is running and the URL is correct.`, "Integrity Check Failed");
+          toast.error(`Failed at step: ${result.step}\n\nError: ${result.message}`, "Integrity Check Failed");
       }
   };
 
@@ -136,77 +259,52 @@ export const Settings: React.FC = () => {
       setIsPulling(true);
       const result = await pullFromRemote(false);
       setIsPulling(false);
+      setLastSynced(getLastSyncedAt());
+      if (result.success) setConnectionHealth('verified');
 
       if (result.success) {
-          toast.success("Data synced successfully.", "Sync Successful");
-          const reload = await toast.confirm({ message: "Reload page to refresh view?", variant: 'default', confirmLabel: 'Reload' });
-          if (reload) window.location.reload();
+          toast.success("Data synced. Reloading to refresh views…");
+          setTimeout(() => window.location.reload(), 600);
       } else {
+          setConnectionHealth('error');
           toast.error(`Sync Failed:\n${result.message}`);
       }
   };
 
   const handleForcePush = async () => {
       const ok = await toast.confirm({
-          message: "This will overwrite any existing data in your Neon database with the data currently in this browser.\n\nUse this only to initialize a new database or force an update.",
-          title: "Warning: Overwrite Database?",
+          message: "This uploads the data in this browser to Neon. Any newer remote values for the same records will be overwritten.\n\nUse this to initialize a fresh database or force-publish local state.",
+          title: "Overwrite remote with local data?",
           variant: 'danger',
-          confirmLabel: 'Proceed'
+          confirmLabel: 'Upload'
       });
       if (!ok) return;
 
       setIsPushing(true);
       const result = await forcePushToRemote();
       setIsPushing(false);
+      setLastSynced(getLastSyncedAt());
 
       if (result.success) {
+          setConnectionHealth('verified');
           toast.success(result.message, "Upload Successful");
       } else {
-          toast.error(result.message, "Upload Failed");
+          setConnectionHealth('error');
+          const detail = result.failures && result.failures.length
+              ? `${result.message}\n\nFailures:\n• ${result.failures.join('\n• ')}`
+              : result.message;
+          toast.error(detail, "Upload Failed");
       }
   };
 
   const handleDisconnect = async () => {
-      const ok = await toast.confirm({ message: "Are you sure you want to disconnect? Syncing will stop.", variant: 'danger', confirmLabel: 'Disconnect' });
+      const ok = await toast.confirm({ message: "Are you sure you want to disconnect? Syncing will stop and the API key will be cleared from this session.", variant: 'danger', confirmLabel: 'Disconnect' });
       if (!ok) return;
       setApiConfig('', '');
       setApiConfigState({ url: '', key: '' });
-      window.location.reload();
-  };
-
-  const handleAddUser = (e: React.FormEvent) => {
-      e.preventDefault();
-      setPasswordError('');
-
-      if (findUserByEmail(newUser.email || '')) {
-          setPasswordError("A user with that email already exists.");
-          return;
-      }
-
-      const pwd = newUser.password || '';
-      if (pwd.length < 8) {
-          setPasswordError("Password must be at least 8 characters");
-          return;
-      }
-      if (!/[A-Z]/.test(pwd) || !/[0-9]/.test(pwd)) {
-          setPasswordError("Password must contain at least one uppercase letter and a number");
-          return;
-      }
-
-      const user: UserType = {
-          id: Date.now().toString(),
-          firstName: newUser.firstName!,
-          lastName: newUser.lastName!,
-          email: newUser.email!,
-          role: newUser.role as 'Admin' | 'Manager' | 'Staff',
-          password: newUser.password,
-          status: 'Active' // Manually added users are active by default
-      };
-      addUser(user);
-      setUsers(getUsers());
-      setIsAddUserModalOpen(false);
-      setNewUser({ firstName: '', lastName: '', email: '', role: 'Staff', password: '' });
-      toast.success(`User ${user.firstName} ${user.lastName} created successfully.`);
+      setConnectionHealth('disconnected');
+      setLastSynced(null);
+      toast.success('Disconnected from Cloud Database.');
   };
 
   const handleInviteUser = async (e: React.FormEvent) => {
@@ -260,7 +358,31 @@ export const Settings: React.FC = () => {
       }
   };
 
-  const handleEditUser = (e: React.FormEvent) => { e.preventDefault(); if (editingUser) { updateUser(editingUser); setUsers(getUsers()); setEditingUser(null); toast.success(`${editingUser.firstName} ${editingUser.lastName} updated.`); } };
+  const handleEditUser = async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!editingUser) return;
+      const original = users.find(u => u.id === editingUser.id);
+      const roleChanged = !!original && original.role !== editingUser.role;
+
+      // Role changes (and especially escalations to Admin) are one of the
+      // highest-impact actions in the app. Require a typed confirm so a
+      // compromised session or a mis-click can't silently grant Admin.
+      if (roleChanged) {
+          const escalation = editingUser.role === 'Admin' && original?.role !== 'Admin';
+          const ok = await toast.confirm({
+              title: escalation ? 'Grant administrator access?' : 'Change user role?',
+              message: `You are changing ${editingUser.firstName} ${editingUser.lastName}'s role from ${original?.role} to ${editingUser.role}.${escalation ? ' This grants full access to users, data, and the backend connection.' : ''}`,
+              variant: escalation ? 'danger' : 'default',
+              confirmLabel: escalation ? 'Grant Admin' : 'Change role'
+          });
+          if (!ok) return;
+      }
+
+      updateUser(editingUser);
+      setUsers(getUsers());
+      setEditingUser(null);
+      toast.success(`${editingUser.firstName} ${editingUser.lastName} updated.`);
+  };
   const handleConfirmDelete = () => {
       if (!userToDelete) return;
       if (currentUser && userToDelete.id === currentUser.id) {
@@ -285,7 +407,24 @@ export const Settings: React.FC = () => {
       }
   };
   
-  const handleExportAuditLogs = () => { if (auditLogs.length === 0) { toast.info("No logs to export."); return; } const csvRows = auditLogs.map(log => `${log.id},"${log.timestamp}","${log.user}","${log.action}","${log.details.replace(/"/g, '""')}"`).join("\n"); const blob = new Blob(["ID,Timestamp,User,Action,Details\n" + csvRows], { type: 'text/csv;charset=utf-8;' }); const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.setAttribute('download', `audit_logs_${new Date().toISOString().slice(0,10)}.csv`); document.body.appendChild(link); link.click(); document.body.removeChild(link); toast.success("Audit logs exported."); };
+  const handleExportAuditLogs = () => {
+    if (auditLogs.length === 0) { toast.info("No logs to export."); return; }
+    const header = ['ID','Timestamp','User','Action','Details'].map(csvEscape).join(',');
+    const rows = auditLogs.map(log => [log.id, log.timestamp, log.user, log.action, log.details].map(csvEscape).join(','));
+    // UTF-8 BOM (\uFEFF) tells Excel on Windows to decode the file as UTF-8;
+    // without it, diacritics in names are mangled as mojibake.
+    const csv = '\uFEFF' + [header, ...rows].join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `audit_logs_${new Date().toISOString().slice(0,10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    toast.success("Audit logs exported.");
+  };
 
   const handleDownloadBackup = () => {
     const json = createSystemBackup();
@@ -333,139 +472,131 @@ export const Settings: React.FC = () => {
     }
   };
 
-  const SQL_SCRIPT = `-- BLACK IVY MEDIA - NEON SCHEMA SETUP
--- Run this entire script in the Neon SQL Editor (or \\i-load it via psql)
--- to initialize a fresh database. The application API in /server connects
--- via DATABASE_URL and expects these tables to exist.
-
--- 1. Key-Value Store (Primary Sync Storage)
-CREATE TABLE IF NOT EXISTS app_data (
-  key TEXT PRIMARY KEY,
-  value JSONB,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- 2. Relational Tables (For Advanced SQL Reporting & Integration)
-
--- Clients
-CREATE TABLE IF NOT EXISTS clients (
-  id TEXT PRIMARY KEY,
-  company_name TEXT,
-  contact_person TEXT,
-  email TEXT,
-  phone TEXT,
-  billing_day INTEGER,
-  status TEXT DEFAULT 'Active',
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- Billboards
-CREATE TABLE IF NOT EXISTS billboards (
-  id TEXT PRIMARY KEY,
-  name TEXT,
-  location TEXT,
-  town TEXT,
-  type TEXT,
-  width NUMERIC,
-  height NUMERIC,
-  coordinates JSONB, -- {lat: 0, lng: 0}
-  image_url TEXT,
-  visibility TEXT,
-  side_a_rate NUMERIC,
-  side_b_rate NUMERIC,
-  side_a_status TEXT,
-  side_b_status TEXT,
-  rate_per_slot NUMERIC,
-  total_slots INTEGER,
-  rented_slots INTEGER,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- Contracts
-CREATE TABLE IF NOT EXISTS contracts (
-  id TEXT PRIMARY KEY,
-  client_id TEXT REFERENCES clients(id),
-  billboard_id TEXT REFERENCES billboards(id),
-  start_date DATE,
-  end_date DATE,
-  monthly_rate NUMERIC,
-  installation_cost NUMERIC,
-  printing_cost NUMERIC,
-  total_contract_value NUMERIC,
-  status TEXT,
-  details TEXT,
-  side TEXT,
-  slot_number INTEGER,
-  has_vat BOOLEAN,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- Invoices
-CREATE TABLE IF NOT EXISTS invoices (
-  id TEXT PRIMARY KEY,
-  client_id TEXT REFERENCES clients(id),
-  contract_id TEXT,
-  date DATE,
-  items JSONB, -- Array of line items
-  subtotal NUMERIC,
-  vat_amount NUMERIC,
-  total NUMERIC,
-  status TEXT,
-  type TEXT,
-  payment_method TEXT,
-  payment_reference TEXT,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- Expenses
-CREATE TABLE IF NOT EXISTS expenses (
-  id TEXT PRIMARY KEY,
-  category TEXT,
-  description TEXT,
-  amount NUMERIC,
-  date DATE,
-  reference TEXT,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- Maintenance Logs
-CREATE TABLE IF NOT EXISTS maintenance_logs (
-  id TEXT PRIMARY KEY,
-  billboard_id TEXT REFERENCES billboards(id),
-  date DATE,
-  type TEXT,
-  technician TEXT,
-  notes TEXT,
-  status TEXT,
-  next_due_date DATE,
-  cost NUMERIC,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- Users
-CREATE TABLE IF NOT EXISTS users (
-  id TEXT PRIMARY KEY,
-  first_name TEXT,
-  last_name TEXT,
-  email TEXT,
-  role TEXT,
-  password TEXT, -- Note: Store hashed passwords in production
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- 3. Access control
--- Neon has no Row Level Security layer equivalent to Supabase; the API
--- server in /server is the only component that connects to this database
--- using DATABASE_URL, so protect access there (API_SECRET env var) and by
--- keeping the connection string out of browsers.
-`;
-
   return (
     <>
       <div className="space-y-8 animate-fade-in">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"><div><h2 className="text-4xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-slate-900 to-slate-600 mb-2">System Settings</h2><p className="text-slate-500 font-medium">Manage organization profile, users, and data</p></div><div className="flex bg-white rounded-full border border-slate-200 p-1 shadow-sm overflow-x-auto max-w-full"><button onClick={() => setActiveTab('General')} className={`px-5 py-2 rounded-full text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'General' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-900'}`}>General</button><button onClick={() => setActiveTab('Data')} className={`px-5 py-2 rounded-full text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'Data' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-900'}`}>Data</button><button onClick={() => setActiveTab('SQL')} className={`px-5 py-2 rounded-full text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'SQL' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-900'}`}>Cloud Database</button><button onClick={() => setActiveTab('Audit')} className={`px-5 py-2 rounded-full text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'Audit' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-900'}`}>Audit</button><button onClick={() => setActiveTab('Features')} className={`px-5 py-2 rounded-full text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'Features' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-900'}`}>Features</button></div></div>
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"><div><h2 className="text-4xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-slate-900 to-slate-600 mb-2">System Settings</h2><p className="text-slate-500 font-medium">Manage organization profile, users, and data</p></div><div className="flex bg-white rounded-full border border-slate-200 p-1 shadow-sm overflow-x-auto max-w-full"><button onClick={() => guardedSetTab('General')} className={`px-5 py-2 rounded-full text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'General' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-900'}`}>General</button><button onClick={() => guardedSetTab('Data')} className={`px-5 py-2 rounded-full text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'Data' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-900'}`}>Data</button><button onClick={() => guardedSetTab('SQL')} className={`px-5 py-2 rounded-full text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'SQL' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-900'}`}>Cloud Database</button>{isAdmin && <button onClick={() => guardedSetTab('Audit')} className={`px-5 py-2 rounded-full text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'Audit' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-900'}`}>Audit</button>}<button onClick={() => guardedSetTab('Features')} className={`px-5 py-2 rounded-full text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'Features' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-900'}`}>Features</button></div></div>
         {activeTab === 'General' && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 animate-fade-in"><div className="lg:col-span-2 space-y-8"><div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100"><div className="flex items-center gap-3 mb-8"><div className="p-3 bg-blue-50 rounded-xl"><Building className="w-6 h-6 text-blue-600" /></div><h3 className="text-xl font-bold text-slate-800">Company Profile</h3></div><div className="space-y-8"><div className="grid grid-cols-1 md:grid-cols-2 gap-8"><div className="md:col-span-2"><MinimalInput label="Company Registered Name" value={profile.name} onChange={(e: any) => setProfile({...profile, name: e.target.value})} /></div><MinimalInput label="Tax ID / VAT Number" value={profile.vatNumber} onChange={(e: any) => setProfile({...profile, vatNumber: e.target.value})} /><MinimalInput label="Registration Number" value={profile.regNumber} onChange={(e: any) => setProfile({...profile, regNumber: e.target.value})} /></div><div className="border-t border-slate-50 pt-6"><h4 className="flex items-center gap-2 text-xs font-bold uppercase text-slate-400 tracking-wider mb-6"><Phone size={14} /> Contact Information</h4><div className="grid grid-cols-1 md:grid-cols-2 gap-8"><MinimalInput label="General Email" value={profile.email} onChange={(e: any) => setProfile({...profile, email: e.target.value})} type="email" /><MinimalInput label="Support Email" value={profile.supportEmail} onChange={(e: any) => setProfile({...profile, supportEmail: e.target.value})} type="email" /><MinimalInput label="Phone Number" value={profile.phone} onChange={(e: any) => setProfile({...profile, phone: e.target.value})} type="tel" /><MinimalInput label="Website" value={profile.website} onChange={(e: any) => setProfile({...profile, website: e.target.value})} /></div></div><div className="border-t border-slate-50 pt-6"><h4 className="flex items-center gap-2 text-xs font-bold uppercase text-slate-400 tracking-wider mb-6"><MapPin size={14} /> Location Details</h4><div className="space-y-6"><MinimalInput label="Street Address" value={profile.address} onChange={(e: any) => setProfile({...profile, address: e.target.value})} /><div className="grid grid-cols-2 gap-8"><MinimalInput label="City" value={profile.city} onChange={(e: any) => setProfile({...profile, city: e.target.value})} /><MinimalInput label="Country" value={profile.country} onChange={(e: any) => setProfile({...profile, country: e.target.value})} /></div></div></div></div><div className="mt-8 flex justify-end pt-4 border-t border-slate-50"><button onClick={handleSaveCompanyDetails} className="px-8 py-3 bg-slate-900 text-white rounded-xl text-sm font-bold uppercase tracking-wider hover:bg-slate-800 shadow-lg shadow-slate-900/20 transition-all hover:scale-105">Save Changes</button></div></div>{isAdmin ? (<div className="bg-white shadow-sm rounded-2xl border border-slate-100 overflow-hidden"><div className="p-6 border-b border-slate-100 flex justify-between items-center"><div className="flex items-center gap-3"><div className="p-2 bg-green-50 rounded-xl"><Shield className="w-6 h-6 text-green-600" /></div><h3 className="text-lg font-bold text-slate-800">User Access Control</h3></div><div className="flex items-center gap-2"><button onClick={() => { setInviteError(''); setIsInviteModalOpen(true); }} className="flex items-center gap-1 text-sm text-emerald-600 font-bold uppercase tracking-wider hover:bg-emerald-50 px-3 py-2 rounded-lg transition-colors" title="Email an invitation with a temporary password"><Mail size={16} /> Invite</button></div></div><div className="overflow-x-auto"><table className="w-full text-left text-sm text-slate-600 min-w-[500px]"><thead className="bg-slate-50/50 border-b border-slate-100"><tr><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider">User</th><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider">Email</th><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider">Role</th><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider">Status</th><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider text-right">Actions</th></tr></thead><tbody className="divide-y divide-slate-100">{users.map(user => (<tr key={user.id} className="hover:bg-slate-50/50 transition-colors"><td className="px-6 py-4 font-medium text-slate-900 flex items-center gap-2"><div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-slate-500 font-bold border border-slate-300">{user.firstName.charAt(0)}</div>{user.firstName} {user.lastName}</td><td className="px-6 py-4">{user.email}</td><td className="px-6 py-4"><span className={`px-2 py-1 rounded text-xs font-bold uppercase tracking-wider ${user.role === 'Admin' ? 'bg-purple-50 text-purple-700' : 'bg-blue-50 text-blue-700'}`}>{user.role}</span></td><td className="px-6 py-4"><span className={`px-2 py-1 rounded text-xs font-bold uppercase tracking-wider ${user.status === 'Active' ? 'bg-green-50 text-green-700' : user.status === 'Denied' ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-700'}`}>{user.status || 'Active'}</span></td><td className="px-6 py-4 flex justify-end gap-2">{user.status === 'Pending' && (<button onClick={() => handleApproveUser(user)} className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors" title="Approve User"><UserCheck size={16}/></button>)}<button onClick={() => handleResendOrReset(user)} disabled={resendingUserId === user.id || !user.email} className="p-2 text-slate-400 hover:bg-indigo-50 hover:text-indigo-600 rounded-lg transition-colors disabled:opacity-40" title={user.status === 'Pending' ? 'Resend invite email' : 'Reset password and email the new one'}>{resendingUserId === user.id ? <Loader2 size={16} className="animate-spin" /> : user.status === 'Pending' ? <Send size={16} /> : <KeyRound size={16} />}</button><button onClick={() => setEditingUser(user)} className="p-2 text-slate-400 hover:bg-white hover:shadow-sm hover:text-slate-800 rounded-lg transition-all border border-transparent hover:border-slate-100" title="Edit user"><Edit2 size={16} /></button><button onClick={() => setUserToDelete(user)} disabled={!!currentUser && currentUser.id === user.id} className="p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 rounded-lg transition-colors disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-slate-400" title={!!currentUser && currentUser.id === user.id ? "You can't delete your own account" : 'Delete user'}><Trash2 size={16} /></button></td></tr>))}</tbody></table></div></div>) : (<div className="bg-white shadow-sm rounded-2xl border border-slate-100 p-8 text-center"><div className="p-3 bg-amber-50 rounded-xl inline-flex mb-3"><Shield className="w-6 h-6 text-amber-600" /></div><h3 className="text-lg font-bold text-slate-800 mb-2">Insufficient permissions</h3><p className="text-sm text-slate-500">Only administrators can manage user accounts.</p></div>)}</div><div className="space-y-6"><div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100"><h3 className="text-lg font-bold text-slate-800 mb-6">Branding & Identity</h3><div className="flex flex-col items-center justify-center p-8 border-2 border-dashed border-slate-200 rounded-2xl mb-6 bg-slate-50/50 hover:bg-slate-50 transition-colors"><div className="text-center relative group cursor-pointer" onClick={() => fileInputRef.current?.click()}><div className="w-24 h-24 bg-white rounded-full mx-auto mb-4 flex items-center justify-center overflow-hidden shadow-md border-4 border-white group-hover:scale-105 transition-transform"><img src={logoPreview} alt="Logo" className="w-full h-full object-cover"/></div><div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"><div className="bg-black/50 text-white text-xs font-bold px-2 py-1 rounded">Change</div></div><p className="text-sm font-medium text-slate-600">Company Logo</p><p className="text-xs text-slate-400 mt-1">Click to Upload (Max 1MB)</p><input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleLogoUpload}/></div></div><button onClick={() => fileInputRef.current?.click()} className="w-full py-3 border border-slate-200 rounded-xl text-xs font-bold uppercase tracking-wider text-slate-600 hover:bg-slate-50 hover:border-slate-300 transition-all flex items-center justify-center gap-2"><Upload size={14}/> Upload New Logo</button></div><div className="bg-gradient-to-br from-blue-900 to-slate-900 p-6 rounded-2xl shadow-lg text-white relative overflow-hidden group"><div className="relative z-10"><h3 className="text-lg font-bold mb-2 flex items-center gap-2"><Cloud size={18}/> System Status</h3><div className="flex items-center gap-2 mb-6"><div className="w-2.5 h-2.5 rounded-full bg-green-400 animate-pulse shadow-[0_0_10px_rgba(74,222,128,0.5)]"></div><span className="text-blue-100 text-sm font-medium">Systems Operational</span></div><div className="space-y-2 text-xs text-blue-200/80 border-t border-white/10 pt-4 font-mono"><p>Version: <span className="text-white">{RELEASE_NOTES[0].version}</span></p><p>Build: <span className="text-white">Production-Clean</span></p><p>Last Update: {new Date().toLocaleDateString()}</p></div></div><div className="absolute -bottom-12 -right-12 w-48 h-48 bg-blue-500 rounded-full blur-3xl opacity-20 group-hover:opacity-30 transition-opacity"></div><div className="absolute top-0 right-0 w-32 h-32 bg-purple-500 rounded-full blur-3xl opacity-10"></div></div></div></div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 animate-fade-in">
+          <div className="lg:col-span-2 space-y-8">
+            <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100">
+              <div className="flex items-center gap-3 mb-8">
+                <div className="p-3 bg-blue-50 rounded-xl"><Building className="w-6 h-6 text-blue-600" /></div>
+                <h3 className="text-xl font-bold text-slate-800">Company Profile</h3>
+                {profileDirty && <span className="ml-auto text-[10px] font-bold uppercase tracking-wider text-amber-600 bg-amber-50 border border-amber-100 px-2 py-1 rounded-full">Unsaved changes</span>}
+              </div>
+              <div className="space-y-8">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  <div className="md:col-span-2"><MinimalInput label="Company Registered Name" value={profile.name} onChange={e => updateProfileField('name', e.target.value)} /></div>
+                  <MinimalInput label="Tax ID / VAT Number" value={profile.vatNumber} onChange={e => updateProfileField('vatNumber', e.target.value)} />
+                  <MinimalInput label="Registration Number" value={profile.regNumber} onChange={e => updateProfileField('regNumber', e.target.value)} />
+                </div>
+                <div className="border-t border-slate-50 pt-6">
+                  <h4 className="flex items-center gap-2 text-xs font-bold uppercase text-slate-400 tracking-wider mb-6"><Phone size={14} /> Contact Information</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <MinimalInput label="General Email" value={profile.email} onChange={e => updateProfileField('email', e.target.value)} type="email" />
+                    <MinimalInput label="Support Email" value={profile.supportEmail} onChange={e => updateProfileField('supportEmail', e.target.value)} type="email" />
+                    <MinimalInput label="Phone Number" value={profile.phone} onChange={e => updateProfileField('phone', e.target.value)} type="tel" />
+                    <MinimalInput label="Website" value={profile.website} onChange={e => updateProfileField('website', e.target.value)} />
+                  </div>
+                </div>
+                <div className="border-t border-slate-50 pt-6">
+                  <h4 className="flex items-center gap-2 text-xs font-bold uppercase text-slate-400 tracking-wider mb-6"><MapPin size={14} /> Location Details</h4>
+                  <div className="space-y-6">
+                    <MinimalInput label="Street Address" value={profile.address} onChange={e => updateProfileField('address', e.target.value)} />
+                    <div className="grid grid-cols-2 gap-8">
+                      <MinimalInput label="City" value={profile.city} onChange={e => updateProfileField('city', e.target.value)} />
+                      <MinimalInput label="Country" value={profile.country} onChange={e => updateProfileField('country', e.target.value)} />
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="mt-8 flex justify-end pt-4 border-t border-slate-50">
+                <button onClick={handleSaveCompanyDetails} disabled={!profileDirty} className="px-8 py-3 bg-slate-900 text-white rounded-xl text-sm font-bold uppercase tracking-wider hover:bg-slate-800 shadow-lg shadow-slate-900/20 transition-all hover:scale-105 disabled:opacity-40 disabled:hover:bg-slate-900 disabled:hover:scale-100 disabled:cursor-not-allowed">Save Changes</button>
+              </div>
+            </div>
+            <div className="bg-white shadow-sm rounded-2xl border border-slate-100 overflow-hidden">
+              <div className="p-6 border-b border-slate-100 flex justify-between items-center">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-green-50 rounded-xl"><Shield className="w-6 h-6 text-green-600" /></div>
+                  <h3 className="text-lg font-bold text-slate-800">User Access Control</h3>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => { setInviteError(''); setIsInviteModalOpen(true); }} className="flex items-center gap-1 text-sm text-emerald-600 font-bold uppercase tracking-wider hover:bg-emerald-50 px-3 py-2 rounded-lg transition-colors" title="Email an invitation with a temporary password"><Mail size={16} /> Invite</button>
+                </div>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm text-slate-600 min-w-[500px]">
+                  <thead className="bg-slate-50/50 border-b border-slate-100">
+                    <tr>
+                      <th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider">User</th>
+                      <th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider">Email</th>
+                      <th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider">Role</th>
+                      <th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider">Status</th>
+                      <th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {users.map(user => (
+                      <tr key={user.id} className="hover:bg-slate-50/50 transition-colors">
+                        <td className="px-6 py-4 font-medium text-slate-900 flex items-center gap-2">
+                          <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-slate-500 font-bold border border-slate-300">{user.firstName.charAt(0)}</div>
+                          {user.firstName} {user.lastName}
+                        </td>
+                        <td className="px-6 py-4">{user.email}</td>
+                        <td className="px-6 py-4"><span className={`px-2 py-1 rounded text-xs font-bold uppercase tracking-wider ${user.role === 'Admin' ? 'bg-purple-50 text-purple-700' : 'bg-blue-50 text-blue-700'}`}>{user.role}</span></td>
+                        <td className="px-6 py-4"><span className={`px-2 py-1 rounded text-xs font-bold uppercase tracking-wider ${user.status === 'Active' ? 'bg-green-50 text-green-700' : user.status === 'Denied' ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-700'}`}>{user.status || 'Active'}</span></td>
+                        <td className="px-6 py-4 flex justify-end gap-2">
+                          {user.status === 'Pending' && (<button onClick={() => handleApproveUser(user)} className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors" title="Approve User"><UserCheck size={16}/></button>)}
+                          <button onClick={() => handleResendOrReset(user)} disabled={resendingUserId === user.id || !user.email} className="p-2 text-slate-400 hover:bg-indigo-50 hover:text-indigo-600 rounded-lg transition-colors disabled:opacity-40" title={user.status === 'Pending' ? 'Resend invite email' : 'Reset password and email the new one'}>
+                            {resendingUserId === user.id ? <Loader2 size={16} className="animate-spin" /> : user.status === 'Pending' ? <Send size={16} /> : <KeyRound size={16} />}
+                          </button>
+                          <button onClick={() => setEditingUser(user)} className="p-2 text-slate-400 hover:bg-white hover:shadow-sm hover:text-slate-800 rounded-lg transition-all border border-transparent hover:border-slate-100" title="Edit user"><Edit2 size={16} /></button>
+                          <button onClick={() => setUserToDelete(user)} disabled={!!currentUser && currentUser.id === user.id} className="p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 rounded-lg transition-colors disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-slate-400" title={!!currentUser && currentUser.id === user.id ? "You can't delete your own account" : 'Delete user'}><Trash2 size={16} /></button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+          <div className="space-y-6">
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+              <h3 className="text-lg font-bold text-slate-800 mb-6">Branding & Identity</h3>
+              <div className="flex flex-col items-center justify-center p-8 border-2 border-dashed border-slate-200 rounded-2xl mb-6 bg-slate-50/50 hover:bg-slate-50 transition-colors">
+                <div className="text-center relative group cursor-pointer" onClick={() => fileInputRef.current?.click()}>
+                  <div className="w-24 h-24 bg-white rounded-full mx-auto mb-4 flex items-center justify-center overflow-hidden shadow-md border-4 border-white group-hover:scale-105 transition-transform">
+                    <img src={logoPreview} alt="Logo" className="w-full h-full object-cover"/>
+                  </div>
+                  <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="bg-black/50 text-white text-xs font-bold px-2 py-1 rounded">Change</div>
+                  </div>
+                  <p className="text-sm font-medium text-slate-600">Company Logo</p>
+                  <p className="text-xs text-slate-400 mt-1">Click to Upload (Max 1MB)</p>
+                  <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleLogoUpload}/>
+                </div>
+              </div>
+              <button onClick={() => fileInputRef.current?.click()} className="w-full py-3 border border-slate-200 rounded-xl text-xs font-bold uppercase tracking-wider text-slate-600 hover:bg-slate-50 hover:border-slate-300 transition-all flex items-center justify-center gap-2"><Upload size={14}/> Upload New Logo</button>
+            </div>
+            <div className="bg-gradient-to-br from-blue-900 to-slate-900 p-6 rounded-2xl shadow-lg text-white relative overflow-hidden group">
+              <div className="relative z-10">
+                <h3 className="text-lg font-bold mb-2 flex items-center gap-2"><Cloud size={18}/> System Status</h3>
+                <div className="flex items-center gap-2 mb-6">
+                  <div className="w-2.5 h-2.5 rounded-full bg-green-400 animate-pulse shadow-[0_0_10px_rgba(74,222,128,0.5)]"></div>
+                  <span className="text-blue-100 text-sm font-medium">Systems Operational</span>
+                </div>
+                <div className="space-y-2 text-xs text-blue-200/80 border-t border-white/10 pt-4 font-mono">
+                  <p>Version: <span className="text-white">{RELEASE_NOTES[0].version}</span></p>
+                  <p>Build: <span className="text-white">Production-Clean</span></p>
+                  <p>Last Update: {new Date().toLocaleDateString()}</p>
+                </div>
+              </div>
+              <div className="absolute -bottom-12 -right-12 w-48 h-48 bg-blue-500 rounded-full blur-3xl opacity-20 group-hover:opacity-30 transition-opacity"></div>
+              <div className="absolute top-0 right-0 w-32 h-32 bg-purple-500 rounded-full blur-3xl opacity-10"></div>
+            </div>
+          </div>
+        </div>
         )}
         {activeTab === 'SQL' && (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 animate-fade-in">
@@ -481,15 +612,33 @@ CREATE TABLE IF NOT EXISTS users (
                                 </div>
                             </div>
 
-                            <div className={`mb-8 p-4 rounded-xl border flex items-center gap-3 ${apiConfig.url ? 'bg-emerald-50 border-emerald-100 text-emerald-800' : 'bg-slate-50 border-slate-100 text-slate-500'}`}>
-                                <div className={`p-2 rounded-full ${apiConfig.url ? 'bg-emerald-200 text-emerald-700' : 'bg-slate-200 text-slate-400'}`}>
-                                    <Wifi size={20} />
-                                </div>
-                                <div>
-                                    <p className="text-xs font-bold uppercase tracking-wider mb-0.5">Connection Status</p>
-                                    <p className="text-sm font-bold">{apiConfig.url ? 'Connected' : 'Disconnected'}</p>
-                                </div>
-                            </div>
+                            {(() => {
+                                const status = connectionHealth;
+                                const palette = {
+                                    verified:     { bg: 'bg-emerald-50 border-emerald-100 text-emerald-800', chip: 'bg-emerald-200 text-emerald-700', dot: 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.6)] animate-pulse', label: 'Connected & verified' },
+                                    unknown:      { bg: 'bg-amber-50 border-amber-100 text-amber-800',       chip: 'bg-amber-200 text-amber-700',       dot: 'bg-amber-500',                                                         label: 'Connected — verifying…' },
+                                    error:        { bg: 'bg-red-50 border-red-100 text-red-800',              chip: 'bg-red-200 text-red-700',           dot: 'bg-red-500',                                                           label: 'Connection error' },
+                                    disconnected: { bg: 'bg-slate-50 border-slate-100 text-slate-500',        chip: 'bg-slate-200 text-slate-400',       dot: 'bg-slate-400',                                                         label: 'Disconnected' },
+                                }[status];
+                                return (
+                                    <div className={`mb-6 p-4 rounded-xl border flex items-center gap-3 ${palette.bg}`}>
+                                        <div className={`p-2 rounded-full ${palette.chip} relative`}>
+                                            <Wifi size={20} />
+                                            <span className={`absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ${palette.dot} ring-2 ring-white`} />
+                                        </div>
+                                        <div className="flex-1">
+                                            <p className="text-xs font-bold uppercase tracking-wider mb-0.5">Connection Status</p>
+                                            <p className="text-sm font-bold">{palette.label}</p>
+                                        </div>
+                                        {lastSynced && (
+                                            <div className="text-right">
+                                                <p className="text-[10px] font-bold uppercase tracking-wider opacity-70">Last synced</p>
+                                                <p className="text-xs font-mono">{new Date(lastSynced).toLocaleString()}</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })()}
                             
                             <form onSubmit={handleSaveApiConfig} className="space-y-6">
                                 <div>
@@ -652,8 +801,8 @@ CREATE TABLE IF NOT EXISTS users (
                 </div>
             </div>
         )}
-        {activeTab === 'Audit' && (
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden animate-fade-in"><div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/30"><div className="flex items-center gap-3"><div className="p-2 bg-slate-100 rounded-xl text-slate-600"><ScrollText size={20}/></div><div><h3 className="text-lg font-bold text-slate-800">Admin Audit Logs</h3><p className="text-xs text-slate-500 font-medium">Track system-wide events and security actions</p></div></div><button onClick={handleExportAuditLogs} className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 hover:border-slate-300 px-4 py-2.5 rounded-xl transition-all shadow-sm"><Download size={14}/> Export CSV</button></div><div className="overflow-x-auto"><table className="w-full text-left text-sm text-slate-600 min-w-[600px]"><thead className="bg-slate-50/50 border-b border-slate-100"><tr><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider">Timestamp</th><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider">User</th><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider">Action</th><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider">Details</th></tr></thead><tbody className="divide-y divide-slate-100">{auditLogs.map(log => (<tr key={log.id} className="hover:bg-slate-50 transition-colors"><td className="px-6 py-4 font-mono text-xs text-slate-500">{log.timestamp}</td><td className="px-6 py-4 font-bold text-slate-800">{log.user}</td><td className="px-6 py-4"><span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-600 text-[10px] font-bold uppercase tracking-wide border border-slate-200">{log.action}</span></td><td className="px-6 py-4 text-slate-600">{log.details}</td></tr>))}</tbody></table></div></div>
+        {activeTab === 'Audit' && isAdmin && (
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden animate-fade-in"><div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/30"><div className="flex items-center gap-3"><div className="p-2 bg-slate-100 rounded-xl text-slate-600"><ScrollText size={20}/></div><div><h3 className="text-lg font-bold text-slate-800">Admin Audit Logs</h3><p className="text-xs text-slate-500 font-medium">Track system-wide events and security actions</p></div></div><button onClick={handleExportAuditLogs} className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 hover:border-slate-300 px-4 py-2.5 rounded-xl transition-all shadow-sm">{auditLoading ? <Loader2 size={14} className="animate-spin"/> : <Download size={14}/>} Export CSV</button></div><div className="overflow-x-auto"><table className="w-full text-left text-sm text-slate-600 min-w-[600px]"><thead className="bg-slate-50/50 border-b border-slate-100"><tr><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider">Timestamp</th><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider">User</th><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider">Action</th><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider">Details</th></tr></thead><tbody className="divide-y divide-slate-100">{auditLogs.map(log => (<tr key={log.id} className="hover:bg-slate-50 transition-colors"><td className="px-6 py-4 font-mono text-xs text-slate-500">{log.timestamp}</td><td className="px-6 py-4 font-bold text-slate-800">{log.user}</td><td className="px-6 py-4"><span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-600 text-[10px] font-bold uppercase tracking-wide border border-slate-200">{log.action}</span></td><td className="px-6 py-4 text-slate-600">{log.details}</td></tr>))}</tbody></table></div></div>
         )}
         {activeTab === 'Features' && (
             <div className="max-w-4xl mx-auto animate-fade-in space-y-8">
@@ -741,7 +890,33 @@ CREATE TABLE IF NOT EXISTS users (
       {isInviteModalOpen && (<div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md flex items-center justify-center z-50 p-4 transition-all"><div className="bg-white/95 backdrop-blur-xl rounded-3xl shadow-2xl max-w-lg w-full border border-white/20 animate-fade-in"><div className="p-6 border-b border-slate-100 flex justify-between items-center"><h3 className="text-xl font-bold text-slate-900 flex items-center gap-2"><Mail size={20} className="text-emerald-600" /> Invite User</h3><button onClick={() => { setIsInviteModalOpen(false); setInviteError(''); }} className="p-2 hover:bg-slate-100 rounded-full transition-colors" disabled={inviteSending}><X size={20} className="text-slate-400" /></button></div><form onSubmit={handleInviteUser} className="p-8 space-y-6"><p className="text-xs text-slate-500 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">A temporary password is generated and emailed via Resend. The invitee signs in and their account activates after admin approval.</p><div className="grid grid-cols-2 gap-6"><MinimalInput label="First Name" value={inviteForm.firstName} onChange={(e: any) => { setInviteForm({...inviteForm, firstName: e.target.value}); setInviteError(''); }} required /><MinimalInput label="Last Name" value={inviteForm.lastName} onChange={(e: any) => { setInviteForm({...inviteForm, lastName: e.target.value}); setInviteError(''); }} required /></div><MinimalInput label="Email Address" type="email" value={inviteForm.email} onChange={(e: any) => { setInviteForm({...inviteForm, email: e.target.value}); setInviteError(''); }} required /><MinimalSelect label="Role" value={inviteForm.role} onChange={(e: any) => setInviteForm({...inviteForm, role: e.target.value})} options={[{value: 'Admin', label: 'Admin (Full Access)'},{value: 'Manager', label: 'Manager (No Settings)'},{value: 'Staff', label: 'Staff (Read Only)'}]} />{inviteError && <p className="text-red-500 text-xs font-bold bg-red-50 border border-red-100 rounded-lg px-3 py-2">{inviteError}</p>}<button type="submit" disabled={inviteSending} className="w-full py-4 text-white bg-emerald-600 rounded-xl hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-xl font-bold uppercase tracking-wider transition-all">{inviteSending ? <><Loader2 size={18} className="animate-spin" /> Sending…</> : <><Send size={18} /> Send Invite</>}</button></form></div></div>)}
       {editingUser && (<div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md flex items-center justify-center z-50 p-4 transition-all"><div className="bg-white/95 backdrop-blur-xl rounded-3xl shadow-2xl max-w-lg w-full border border-white/20"><div className="p-6 border-b border-slate-100 flex justify-between items-center"><h3 className="text-xl font-bold text-slate-900">Edit User</h3><button onClick={() => setEditingUser(null)} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><X size={20} className="text-slate-400" /></button></div><form onSubmit={handleEditUser} className="p-8 space-y-6"><div className="grid grid-cols-2 gap-6"><MinimalInput label="First Name" value={editingUser.firstName} onChange={(e: any) => setEditingUser({...editingUser, firstName: e.target.value})} required /><MinimalInput label="Last Name" value={editingUser.lastName} onChange={(e: any) => setEditingUser({...editingUser, lastName: e.target.value})} required /></div><MinimalInput label="Email Address" type="email" value={editingUser.email} onChange={(e: any) => setEditingUser({...editingUser, email: e.target.value})} required /><div className="grid grid-cols-2 gap-6"><MinimalSelect label="Role" value={editingUser.role} onChange={(e: any) => setEditingUser({...editingUser, role: e.target.value as any})} options={[{value: 'Admin', label: 'Admin (Full Access)'},{value: 'Manager', label: 'Manager (No Settings)'},{value: 'Staff', label: 'Staff (Read Only)'}]} /><MinimalSelect label="Status" value={editingUser.status || 'Active'} onChange={(e: any) => setEditingUser({...editingUser, status: e.target.value as any})} options={[{value: 'Active', label: 'Active'},{value: 'Pending', label: 'Pending Approval'},{value: 'Denied', label: 'Denied / Suspended'}]} /></div>{!!currentUser && currentUser.id === editingUser.id && editingUser.role !== 'Admin' && (<p className="text-xs text-amber-600 font-semibold bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">⚠️ You're changing your own role away from Admin. You may lose access to this page after saving.</p>)}<button type="submit" className="w-full py-4 text-white bg-slate-900 rounded-xl hover:bg-slate-800 flex items-center justify-center gap-2 shadow-xl font-bold uppercase tracking-wider transition-all"><Save size={18} /> Update User</button></form></div></div>)}
       {userToDelete && (<div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md flex items-center justify-center z-50 p-4 transition-all"><div className="bg-white/95 backdrop-blur-xl rounded-2xl shadow-2xl max-w-sm w-full border border-white/20 p-6 text-center"><div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 border-4 border-red-50"><AlertTriangle className="text-red-500" size={32}/></div><h3 className="text-xl font-bold text-slate-900 mb-2">Delete User?</h3><p className="text-slate-500 mb-6 text-sm">Are you sure you want to remove <span className="font-bold text-slate-700">{userToDelete.firstName}</span> from the system?</p><div className="flex gap-3"><button onClick={() => setUserToDelete(null)} className="flex-1 py-3 text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl font-bold uppercase text-xs tracking-wider transition-colors">Cancel</button><button onClick={handleConfirmDelete} className="flex-1 py-3 text-white bg-red-500 hover:bg-red-600 rounded-xl font-bold uppercase text-xs tracking-wider transition-colors shadow-lg shadow-red-500/30">Delete</button></div></div></div>)}
-      {isResetConfirmOpen && (<div className="fixed inset-0 bg-red-900/80 backdrop-blur-md flex items-center justify-center z-50 p-4 transition-all"><div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 text-center"><div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 border-4 border-red-50"><AlertTriangle className="text-red-600" size={32}/></div><h3 className="text-xl font-black text-red-900 mb-2">CRITICAL WARNING</h3><p className="text-slate-600 mb-6 text-sm leading-relaxed">This action will <strong>PERMANENTLY DELETE</strong> all local data including clients, contracts, and financial records. This cannot be undone.</p><div className="flex gap-3"><button onClick={() => setIsResetConfirmOpen(false)} className="flex-1 py-3 text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl font-bold uppercase text-xs tracking-wider transition-colors">Cancel</button><button onClick={resetSystemData} className="flex-1 py-3 text-white bg-red-600 hover:bg-red-700 rounded-xl font-bold uppercase text-xs tracking-wider transition-colors shadow-lg shadow-red-600/30">Wipe Data</button></div></div></div>)}
+      {isResetConfirmOpen && (
+        <div className="fixed inset-0 bg-red-900/80 backdrop-blur-md flex items-center justify-center z-50 p-4 transition-all">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 text-center">
+            <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 border-4 border-red-50"><AlertTriangle className="text-red-600" size={32}/></div>
+            <h3 className="text-xl font-black text-red-900 mb-2">CRITICAL WARNING</h3>
+            <p className="text-slate-600 mb-4 text-sm leading-relaxed">This action will <strong>PERMANENTLY DELETE</strong> all local data including clients, contracts, and financial records. This cannot be undone.</p>
+            <p className="text-xs text-slate-500 mb-2 text-left">Type <span className="font-mono font-bold text-red-700">RESET</span> to confirm:</p>
+            <input
+              type="text"
+              value={resetConfirmText}
+              onChange={e => setResetConfirmText(e.target.value)}
+              autoComplete="off"
+              spellCheck={false}
+              className="w-full px-4 py-3 border border-red-200 rounded-xl font-mono text-sm uppercase tracking-widest focus:border-red-500 focus:ring-0 outline-none mb-6"
+              placeholder="RESET"
+            />
+            <div className="flex gap-3">
+              <button onClick={() => { setIsResetConfirmOpen(false); setResetConfirmText(''); }} className="flex-1 py-3 text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl font-bold uppercase text-xs tracking-wider transition-colors">Cancel</button>
+              <button
+                onClick={resetSystemData}
+                disabled={resetConfirmText !== 'RESET'}
+                className="flex-1 py-3 text-white bg-red-600 hover:bg-red-700 rounded-xl font-bold uppercase text-xs tracking-wider transition-colors shadow-lg shadow-red-600/30 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-red-600"
+              >Wipe Data</button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 };

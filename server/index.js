@@ -74,6 +74,40 @@ async function getCompanyNameFromDb() {
   return 'Black Ivy Media';
 }
 
+// ---- Audit writer ----
+// Writes to the append-only audit_logs table. Never throws — audit failures
+// should never prevent the actual request from succeeding. Returns the row id
+// on success, or null on failure (logged to stderr).
+const crypto = require('crypto');
+async function writeAudit({ req, action, details, actor, source = 'server' }) {
+  try {
+    const id = `log_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+    const u = actor || req?.user || null;
+    const ip =
+      (req?.headers?.['x-forwarded-for'] || '').toString().split(',')[0].trim() ||
+      req?.socket?.remoteAddress || null;
+    await sql.query(
+      `INSERT INTO audit_logs (id, actor_email, actor_id, actor_role, action, details, ip, source)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [
+        id,
+        u?.email || null,
+        u?.id || null,
+        u?.role || null,
+        String(action || 'unknown').slice(0, 200),
+        details ? String(details).slice(0, 2000) : null,
+        ip ? String(ip).slice(0, 64) : null,
+        source,
+      ],
+    );
+    return id;
+  } catch (e) {
+    console.error('[audit] write failed:', e.message);
+    return null;
+  }
+}
+app.locals.writeAudit = writeAudit;
+
 app.use('/auth', createAuthRouter({
   resendClient,
   getCompanyName: () => {
@@ -81,6 +115,7 @@ app.use('/auth', createAuthRouter({
     // fresher name is important. Most paths use this sync cached value.
     return process.env.COMPANY_NAME || 'Black Ivy Media';
   },
+  writeAudit,
 }));
 
 // ---- Protected endpoints ----
@@ -91,6 +126,32 @@ app.use('/sync', requireAuth);
 app.use('/delete', requireAuth);
 app.use('/email', requireAuth, requireRole('Admin', 'Manager'));
 app.use('/force-push', requireAuth, requireRole('Admin'));
+app.use('/audit', requireAuth);
+
+// ---- Audit log endpoints ----
+// POST /audit/log — any authenticated client can forward a client-originated
+// event. Actor attribution is taken from the session, NOT the request body —
+// so `logAction` in the browser cannot spoof another user.
+app.post('/audit/log', async (req, res) => {
+  const { action, details } = req.body || {};
+  if (!action) return res.status(400).json({ error: 'action is required' });
+  const id = await writeAudit({ req, action, details, source: 'client' });
+  res.json({ ok: true, id });
+});
+
+// GET /audit/log — Admin only. Returns the most recent N entries (default 500).
+app.get('/audit/log', requireRole('Admin'), async (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit || '500', 10) || 500, 5000);
+  try {
+    const rows = await sql`
+      SELECT id, ts, actor_email, actor_id, actor_role, action, details, ip, source
+        FROM audit_logs ORDER BY ts DESC LIMIT ${limit}
+    `;
+    res.json({ logs: rows });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // /health is a liveness probe (process up) so a Neon outage doesn't take
 // down the container. /health/db is the readiness probe exposed to the UI.
@@ -135,10 +196,19 @@ app.post('/sync', express.json({ limit: '10mb' }), async (req, res) => {
   let { data } = req.body || {};
   if (!collection) return res.status(400).json({ error: 'collection is required' });
 
+  // Audit logs are append-only and owned exclusively by /audit/log. Reject
+  // any client attempt to overwrite the KV `logs` blob — that was the old
+  // localStorage attack surface.
+  if (collection === 'logs' || collection === 'auditLogs') {
+    writeAudit({ req, action: 'sync.rejected', details: `Attempt to /sync protected collection "${collection}"` });
+    return res.status(403).json({ error: 'Audit logs cannot be written via /sync' });
+  }
+
   // Privilege-escalation guard: writing to the users collection can grant
   // Admin role / Active status / clear mustChangePassword. Only admins.
   if (collection === 'users') {
     if (!req.user || req.user.role !== 'Admin') {
+      writeAudit({ req, action: 'sync.denied', details: `Non-admin (${req.user?.email || 'anon'}) tried to /sync users` });
       return res.status(403).json({ error: 'Admin role required to sync users' });
     }
     // Even for admins, never let /sync touch password state. Those fields
@@ -164,6 +234,10 @@ app.post('/sync', express.json({ limit: '10mb' }), async (req, res) => {
       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
     `;
     await mirrorRelational(collection, data);
+    // Fire-and-forget audit — lightweight, no row counts to avoid PII in logs
+    // for large collections. Count is just the array length for context.
+    const n = Array.isArray(data) ? data.length : (typeof data === 'object' && data ? 1 : 0);
+    writeAudit({ req, action: 'sync.write', details: `collection=${collection} rows=${n}` });
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -176,13 +250,20 @@ app.delete('/delete/:collection/:id', async (req, res) => {
   // Deleting a user is an admin-only action (account lifecycle).
   if (collection === 'users') {
     if (!req.user || req.user.role !== 'Admin') {
+      writeAudit({ req, action: 'delete.denied', details: `Non-admin tried to delete users/${id}` });
       return res.status(403).json({ error: 'Admin role required to delete users' });
     }
+  }
+  // audit_logs is append-only; refuse even if called directly.
+  if (collection === 'audit_logs' || collection === 'logs' || collection === 'auditLogs') {
+    writeAudit({ req, action: 'delete.rejected', details: `Attempt to delete audit_logs/${id}` });
+    return res.status(403).json({ error: 'Audit logs are append-only' });
   }
   const table = RELATIONAL_TABLES[collection];
   if (!table) return res.json({ ok: true, skipped: true });
   try {
     await sql.query(`DELETE FROM ${table} WHERE id = $1`, [id]);
+    writeAudit({ req, action: 'delete.row', details: `${collection}/${id}` });
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -231,6 +312,11 @@ app.post('/email/send', express.json({ limit: '25mb' }), async (req, res) => {
     try {
       console.log('[email]', req.user?.email || 'unknown', '→', to, subject);
     } catch { /* best-effort logging */ }
+    writeAudit({
+      req,
+      action: 'email.send',
+      details: `to=${Array.isArray(to) ? to.join(',') : to} subject="${String(subject).slice(0, 120)}"`,
+    });
 
     const result = await resendClient.emails.send({
       from,
@@ -262,6 +348,14 @@ const RELATIONAL_TABLES = {
   expenses: 'expenses',
   users: 'users',
   maintenance: 'maintenance_logs',
+  // CRM module
+  crmCompanies: 'crm_companies',
+  crmContacts: 'crm_contacts',
+  crmOpportunities: 'crm_opportunities',
+  crmTouchpoints: 'crm_touchpoints',
+  crmTasks: 'crm_tasks',
+  crmEmailThreads: 'crm_email_threads',
+  crmCallLogs: 'crm_call_logs',
 };
 
 // Map camelCase app item → snake_case row for the relational mirror
@@ -309,6 +403,71 @@ const ROW_MAPPERS = {
     id: m.id, billboard_id: m.billboardId, date: m.date || null, type: m.type,
     technician: m.technician, notes: m.notes, status: m.status,
     next_due_date: m.nextDueDate || null, cost: m.cost,
+  }),
+
+  // ---- CRM mirrors ----
+  crmCompanies: (c) => ({
+    id: c.id, name: c.name, industry: c.industry, website: c.website,
+    street_address: c.streetAddress, city: c.city, country: c.country,
+  }),
+  crmContacts: (c) => ({
+    id: c.id, company_id: c.companyId, full_name: c.fullName,
+    job_title: c.jobTitle, phone: c.phone, email: c.email,
+    linkedin_url: c.linkedinUrl, is_primary: !!c.isPrimary,
+  }),
+  crmOpportunities: (o) => ({
+    id: o.id, company_id: o.companyId,
+    primary_contact_id: o.primaryContactId,
+    secondary_contact_id: o.secondaryContactId || null,
+    location_interest: o.locationInterest,
+    billboard_type: o.billboardType,
+    campaign_duration: o.campaignDuration,
+    estimated_value: o.estimatedValue,
+    actual_value: o.actualValue,
+    status: o.status || 'new',
+    stage: o.stage || 'new_lead',
+    lead_source: o.leadSource,
+    last_contact_date: o.lastContactDate,
+    next_follow_up_date: o.nextFollowUpDate,
+    call_outcome_notes: o.callOutcomeNotes,
+    number_of_attempts: o.numberOfAttempts || 0,
+    assigned_to: o.assignedTo,
+    created_by: o.createdBy,
+    closed_at: o.closedAt || null,
+    closed_reason: o.closedReason,
+    days_in_current_stage: o.daysInCurrentStage || 0,
+    stage_history: Array.isArray(o.stageHistory) ? o.stageHistory : [],
+  }),
+  crmTouchpoints: (t) => ({
+    id: t.id, opportunity_id: t.opportunityId, type: t.type,
+    direction: t.direction, subject: t.subject, content: t.content,
+    client_response: t.clientResponse, outcome: t.outcome,
+    sentiment: t.sentiment, duration_seconds: t.durationSeconds,
+    created_by: t.createdBy,
+  }),
+  crmTasks: (t) => ({
+    id: t.id, opportunity_id: t.opportunityId, type: t.type,
+    title: t.title, description: t.description, due_date: t.dueDate,
+    status: t.status || 'pending', priority: t.priority || 'medium',
+    assigned_to: t.assignedTo, completed_by: t.completedBy,
+    completed_at: t.completedAt || null, completion_notes: t.completionNotes,
+    created_by: t.createdBy,
+  }),
+  crmEmailThreads: (e) => ({
+    id: e.id, opportunity_id: e.opportunityId, contact_id: e.contactId,
+    subject: e.subject,
+    messages: Array.isArray(e.messages) ? e.messages : [],
+    status: e.status || 'active',
+    last_activity_at: e.lastActivityAt || null,
+    sent_count: e.sentCount || 0, open_count: e.openCount || 0,
+    click_count: e.clickCount || 0, reply_count: e.replyCount || 0,
+  }),
+  crmCallLogs: (c) => ({
+    id: c.id, opportunity_id: c.opportunityId, contact_id: c.contactId,
+    phone_number: c.phoneNumber, direction: c.direction,
+    started_at: c.startedAt || null, ended_at: c.endedAt || null,
+    duration_seconds: c.durationSeconds || 0, outcome: c.outcome,
+    notes: c.notes, recording_url: c.recordingUrl, created_by: c.createdBy,
   }),
 };
 

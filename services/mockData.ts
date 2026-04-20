@@ -56,14 +56,24 @@ const loadFromStorage = <T>(key: string, defaultValue: T | null): T | null => {
 const DEFAULT_API_URL = '';
 const DEFAULT_API_KEY = '';
 
+// API URL is non-sensitive and may persist across sessions.
+// API key is a bearer secret: keep it in sessionStorage so it doesn't
+// survive browser restart. One-time migration drains any legacy key
+// previously stored in localStorage into sessionStorage, then removes it.
+const legacyKey = localStorage.getItem(STORAGE_KEYS.API_KEY);
+if (legacyKey !== null) {
+    if (legacyKey) sessionStorage.setItem(STORAGE_KEYS.API_KEY, legacyKey);
+    localStorage.removeItem(STORAGE_KEYS.API_KEY);
+}
+
 let remoteApiUrl = localStorage.getItem(STORAGE_KEYS.API_URL) ?? DEFAULT_API_URL;
-let remoteApiKey = localStorage.getItem(STORAGE_KEYS.API_KEY) ?? DEFAULT_API_KEY;
+let remoteApiKey = sessionStorage.getItem(STORAGE_KEYS.API_KEY) ?? DEFAULT_API_KEY;
 
 // Migrate legacy Supabase URLs left over from older installs — they point
 // at the decommissioned Supabase project and will 404 against the new API.
 if (remoteApiUrl && remoteApiUrl.includes('supabase.co')) {
     localStorage.removeItem(STORAGE_KEYS.API_URL);
-    localStorage.removeItem(STORAGE_KEYS.API_KEY);
+    sessionStorage.removeItem(STORAGE_KEYS.API_KEY);
     remoteApiUrl = DEFAULT_API_URL;
     remoteApiKey = DEFAULT_API_KEY;
 }
@@ -74,18 +84,43 @@ export const setApiConfig = (url: string, key: string) => {
     remoteApiUrl = cleanUrl;
     remoteApiKey = key;
     localStorage.setItem(STORAGE_KEYS.API_URL, cleanUrl);
-    localStorage.setItem(STORAGE_KEYS.API_KEY, key);
+    if (key) sessionStorage.setItem(STORAGE_KEYS.API_KEY, key);
+    else sessionStorage.removeItem(STORAGE_KEYS.API_KEY);
 };
 
 export const getApiConfig = () => ({ url: remoteApiUrl, key: remoteApiKey });
 
-const pushToRemote = async (key: string, data: any) => {
-    const collectionName = key.replace('bi_', '');
+// Storage key → server collection name. Explicit map beats regex munging:
+// the /sync endpoint keys on these exact names and unknown names are no-ops.
+const KEY_TO_COLLECTION: Record<string, string> = {
+    [STORAGE_KEYS.BILLBOARDS]: 'billboards',
+    [STORAGE_KEYS.CONTRACTS]: 'contracts',
+    [STORAGE_KEYS.INVOICES]: 'invoices',
+    [STORAGE_KEYS.EXPENSES]: 'expenses',
+    [STORAGE_KEYS.USERS]: 'users',
+    [STORAGE_KEYS.CLIENTS]: 'clients',
+    [STORAGE_KEYS.OUTSOURCED]: 'outsourced',
+    [STORAGE_KEYS.PRINTING]: 'printing',
+    [STORAGE_KEYS.MAINTENANCE]: 'maintenance',
+    [STORAGE_KEYS.LOGO]: 'logo',
+    [STORAGE_KEYS.PROFILE]: 'company_profile',
+};
+
+let lastSyncedAt: string | null = localStorage.getItem('bi_last_synced_at');
+export const getLastSyncedAt = () => lastSyncedAt;
+const markSynced = () => {
+    lastSyncedAt = new Date().toISOString();
+    try { localStorage.setItem('bi_last_synced_at', lastSyncedAt); } catch { /* quota */ }
+};
+
+// Raises on transport/HTTP error so callers can report honest status.
+// Caller decides whether to surface to UI or warn silently.
+const pushToRemote = async (key: string, data: any): Promise<void> => {
+    const collectionName = KEY_TO_COLLECTION[key] ?? key.replace('bi_', '');
 
     // Never push plaintext passwords or reset-token state over /sync. The
     // auth server strips them too, but sanitize client-side as defence-in-
-    // depth — also prevents any legacy localStorage copy from leaking into
-    // request logs. Password/reset state is owned exclusively by /auth/*.
+    // depth. Password/reset state is owned exclusively by /auth/*.
     let payload: any = data;
     if (key === STORAGE_KEYS.USERS && Array.isArray(data)) {
         payload = data.map((u: any) => {
@@ -95,22 +130,18 @@ const pushToRemote = async (key: string, data: any) => {
         });
     }
 
-    try {
-        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-        if (remoteApiKey) headers['Authorization'] = `Bearer ${remoteApiKey}`;
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (remoteApiKey) headers['Authorization'] = `Bearer ${remoteApiKey}`;
 
-        const response = await fetch(`${remoteApiUrl}/sync`, {
-            method: 'POST',
-            headers,
-            credentials: 'include',
-            body: JSON.stringify({ collection: collectionName, data: payload }),
-        });
-        if (!response.ok) {
-            const errText = await response.text();
-            console.warn(`Sync Push Failed for ${collectionName} (${response.status}):`, errText);
-        }
-    } catch (e) {
-        console.warn(`Failed to push ${key} to remote backend:`, e);
+    const response = await fetch(`${remoteApiUrl}/sync`, {
+        method: 'POST',
+        headers,
+        credentials: 'include',
+        body: JSON.stringify({ collection: collectionName, data: payload }),
+    });
+    if (!response.ok) {
+        const errText = await response.text().catch(() => response.statusText);
+        throw new Error(`Sync push failed for ${collectionName} (${response.status}): ${errText}`);
     }
 };
 
@@ -128,31 +159,48 @@ const deleteFromRemote = async (collectionName: string, id: string) => {
     }
 };
 
-// EXPORTED FUNCTION TO SEED DATABASE
-export const forcePushToRemote = async (): Promise<{success: boolean, message: string}> => {
-    console.log("Starting full push to remote...");
-    const collections = [
-        { key: STORAGE_KEYS.BILLBOARDS, data: billboards },
-        { key: STORAGE_KEYS.CLIENTS, data: clients },
-        { key: STORAGE_KEYS.CONTRACTS, data: contracts },
-        { key: STORAGE_KEYS.INVOICES, data: invoices },
-        { key: STORAGE_KEYS.EXPENSES, data: expenses },
-        { key: STORAGE_KEYS.USERS, data: users },
-        { key: STORAGE_KEYS.MAINTENANCE, data: maintenanceLogs },
-        { key: STORAGE_KEYS.OUTSOURCED, data: outsourcedBillboards },
-        { key: STORAGE_KEYS.PRINTING, data: printingJobs },
-        { key: STORAGE_KEYS.PROFILE, data: companyProfile },
-        { key: STORAGE_KEYS.LOGO, data: companyLogo }
+// Bulk-upload every local collection. Returns a per-collection tally so
+// partial failures are visible to the user (previous impl always reported
+// success because the underlying push swallowed all errors).
+export const forcePushToRemote = async (): Promise<{success: boolean, message: string, failures?: string[]}> => {
+    const collections: { key: string, data: any, label: string }[] = [
+        { key: STORAGE_KEYS.BILLBOARDS, data: billboards, label: 'billboards' },
+        { key: STORAGE_KEYS.CLIENTS, data: clients, label: 'clients' },
+        { key: STORAGE_KEYS.CONTRACTS, data: contracts, label: 'contracts' },
+        { key: STORAGE_KEYS.INVOICES, data: invoices, label: 'invoices' },
+        { key: STORAGE_KEYS.EXPENSES, data: expenses, label: 'expenses' },
+        { key: STORAGE_KEYS.USERS, data: users, label: 'users' },
+        { key: STORAGE_KEYS.MAINTENANCE, data: maintenanceLogs, label: 'maintenance' },
+        { key: STORAGE_KEYS.OUTSOURCED, data: outsourcedBillboards, label: 'outsourced' },
+        { key: STORAGE_KEYS.PRINTING, data: printingJobs, label: 'printing' },
+        { key: STORAGE_KEYS.PROFILE, data: companyProfile, label: 'company_profile' },
+        { key: STORAGE_KEYS.LOGO, data: companyLogo, label: 'logo' },
     ];
 
-    try {
-        for (const item of collections) {
+    const failures: string[] = [];
+    for (const item of collections) {
+        try {
             await pushToRemote(item.key, item.data);
+        } catch (e: any) {
+            failures.push(`${item.label}: ${e?.message || 'unknown error'}`);
         }
-        return { success: true, message: "All local data pushed to Neon successfully." };
-    } catch (e: any) {
-        return { success: false, message: `Upload failed: ${e.message}` };
     }
+
+    if (failures.length === 0) {
+        markSynced();
+        logAction('Force Push', `Pushed all ${collections.length} collections to Neon`);
+        return { success: true, message: `Uploaded ${collections.length} collections to Neon.` };
+    }
+    if (failures.length === collections.length) {
+        logAction('Force Push Failed', `All ${collections.length} collections failed`);
+        return { success: false, message: `Upload failed for all collections.`, failures };
+    }
+    logAction('Force Push Partial', `Uploaded ${collections.length - failures.length}/${collections.length} collections; failed: ${failures.map(f => f.split(':')[0]).join(', ')}`);
+    return {
+        success: false,
+        message: `Uploaded ${collections.length - failures.length}/${collections.length} collections. ${failures.length} failed.`,
+        failures,
+    };
 };
 
 export const validateConnection = async (url: string, key: string): Promise<{success: boolean, step: string, message: string}> => {
@@ -184,42 +232,58 @@ export const validateConnection = async (url: string, key: string): Promise<{suc
     }
 };
 
+// Window within which a local-only item is treated as "new, not yet synced"
+// rather than "deleted on remote." 5 min is a generous upper bound for the
+// worst-case pending-push delay; anything older is assumed to be a remote
+// deletion we should honor instead of silently resurrecting.
+const PENDING_PUSH_WINDOW_MS = 5 * 60 * 1000;
+
+const extractIdTimestamp = (id: string): number | null => {
+    if (!id) return null;
+    // Supported ID shapes: raw epoch ms (e.g. "1727384000000"), or
+    // prefixed (e.g. "CLI-1727384000000"). Anything else returns null.
+    const parts = id.split('-');
+    const candidate = parts.length > 1 ? parts[parts.length - 1] : parts[0];
+    const n = parseInt(candidate, 10);
+    if (isNaN(n) || n <= 0) return null;
+    // Only treat 13-digit-ish values as real epoch ms. Short IDs (e.g. "1",
+    // legacy seeded IDs) get null so they don't pretend to be recent.
+    if (n < 1_000_000_000_000) return null;
+    return n;
+};
+
 /**
- * Smart Merge Engine
- * This function merges remote data with local data.
- * It prevents "Server Wins" from deleting locally created items that haven't synced yet.
+ * Merge remote (authoritative) with local.
+ *
+ * Rule: take remote wholesale, but keep any local-only item whose ID
+ * timestamp is within the last PENDING_PUSH_WINDOW_MS — those are items
+ * the user created that likely haven't finished their background push yet.
+ *
+ * Anything local-only with an older or unparseable ID is dropped, because
+ * a sync cycle has had time to replicate it and its absence from remote
+ * means it was deleted intentionally. The previous merge blindly kept all
+ * local-only items, which silently reversed remote deletions.
  */
 const mergeCollections = (local: any[], remote: any[]): any[] => {
-    if (!remote || !Array.isArray(remote)) return local;
+    if (!remote || !Array.isArray(remote)) return Array.isArray(local) ? local : [];
     if (!local || !Array.isArray(local)) return remote;
 
+    const now = Date.now();
     const remoteMap = new Map(remote.map(item => [item.id, item]));
     const merged = [...remote];
 
-    // Iterate local items
-    local.forEach(localItem => {
-        if (!remoteMap.has(localItem.id)) {
-            // Item exists locally but not on remote.
-            // Check if it's a valid ID (contains timestamp)
-            // Format example: CLI-1627384... or just raw timestamps
-            const idParts = localItem.id.split('-');
-            const timestamp = idParts.length > 1 ? parseInt(idParts[1]) : parseInt(localItem.id);
-            
-            // If we can parse a valid timestamp, assume it's a new item created recently
-            if (!isNaN(timestamp) && timestamp > 0) {
-                // Keep local item (it's likely new and waiting to push)
-                merged.push(localItem);
-            } else {
-                // If ID is weird or static and missing from remote, assume it was deleted on remote.
-                // However, for safety in this app version, we err on side of caution: KEEP IT
-                merged.push(localItem); 
-            }
+    for (const localItem of local) {
+        if (remoteMap.has(localItem.id)) continue;
+        const ts = extractIdTimestamp(localItem.id);
+        if (ts !== null && now - ts < PENDING_PUSH_WINDOW_MS) {
+            merged.push(localItem);
         }
-    });
+        // else: remote deleted it (or it's an orphan). Drop.
+    }
 
-    // Remove duplicates (by ID) just in case, preferring the merged version
+    // Dedupe by id, preferring the remote-sourced copy seen first.
     const uniqueMap = new Map();
-    merged.forEach(item => uniqueMap.set(item.id, item));
+    for (const item of merged) if (!uniqueMap.has(item.id)) uniqueMap.set(item.id, item);
     return Array.from(uniqueMap.values());
 };
 
@@ -239,90 +303,47 @@ export const pullFromRemote = async (shouldReload: boolean = false): Promise<{su
         if (response.ok) {
             const remoteData: any = await response.json();
 
-            // --- SMART MERGE LOGIC ---
-            // 1. Billboards
-            if (remoteData.billboards && Array.isArray(remoteData.billboards)) {
-                billboards = mergeCollections(billboards, remoteData.billboards);
-                saveToStorage(STORAGE_KEYS.BILLBOARDS, billboards, false);
-            } else if (billboards && billboards.length > 0) {
-                // If remote is empty but we have data, push ours (Auto-Seed)
-                pushToRemote(STORAGE_KEYS.BILLBOARDS, billboards);
-            }
+            // Apply remote collections to local state. Previously, an absent
+            // collection triggered an "auto-seed push" of local data back to
+            // remote — that silently resurrected remote deletions. Instead,
+            // we only read from remote here; pushes are explicit (user
+            // clicks "Upload Local Data") or per-mutation via saveToStorage.
+            const applyArray = <T>(
+                remoteKey: string,
+                storageKey: string,
+                currentRef: () => T[],
+                setCurrent: (next: T[]) => void,
+            ) => {
+                const incoming = remoteData[remoteKey];
+                if (!Array.isArray(incoming)) return;
+                const next = mergeCollections(currentRef(), incoming);
+                setCurrent(next as T[]);
+                saveToStorage(storageKey, next, false);
+            };
 
-            // 2. Clients
-            if (remoteData.clients && Array.isArray(remoteData.clients)) {
-                clients = mergeCollections(clients, remoteData.clients);
-                saveToStorage(STORAGE_KEYS.CLIENTS, clients, false);
-            } else if (clients && clients.length > 0) {
-                pushToRemote(STORAGE_KEYS.CLIENTS, clients);
-            }
+            applyArray('billboards', STORAGE_KEYS.BILLBOARDS, () => billboards, next => { billboards = next; });
+            applyArray('clients', STORAGE_KEYS.CLIENTS, () => clients, next => { clients = next; });
+            applyArray('contracts', STORAGE_KEYS.CONTRACTS, () => contracts, next => { contracts = next; });
+            applyArray('invoices', STORAGE_KEYS.INVOICES, () => invoices, next => { invoices = next; });
+            applyArray('expenses', STORAGE_KEYS.EXPENSES, () => expenses, next => { expenses = next; });
+            applyArray('users', STORAGE_KEYS.USERS, () => users, next => { users = next; });
+            applyArray('maintenanceLogs', STORAGE_KEYS.MAINTENANCE, () => maintenanceLogs, next => { maintenanceLogs = next; });
+            applyArray('outsourcedBillboards', STORAGE_KEYS.OUTSOURCED, () => outsourcedBillboards, next => { outsourcedBillboards = next; });
 
-            // 3. Contracts
-            if (remoteData.contracts && Array.isArray(remoteData.contracts)) {
-                contracts = mergeCollections(contracts, remoteData.contracts);
-                saveToStorage(STORAGE_KEYS.CONTRACTS, contracts, false);
-            } else if (contracts && contracts.length > 0) {
-                pushToRemote(STORAGE_KEYS.CONTRACTS, contracts);
-            }
-
-            // 4. Invoices
-            if (remoteData.invoices && Array.isArray(remoteData.invoices)) {
-                invoices = mergeCollections(invoices, remoteData.invoices);
-                saveToStorage(STORAGE_KEYS.INVOICES, invoices, false);
-            } else if (invoices && invoices.length > 0) {
-                pushToRemote(STORAGE_KEYS.INVOICES, invoices);
-            }
-
-            // 5. Expenses
-            if (remoteData.expenses && Array.isArray(remoteData.expenses)) {
-                expenses = mergeCollections(expenses, remoteData.expenses);
-                saveToStorage(STORAGE_KEYS.EXPENSES, expenses, false);
-            } else if (expenses && expenses.length > 0) {
-                pushToRemote(STORAGE_KEYS.EXPENSES, expenses);
-            }
-
-            // 6. Users
-            if (remoteData.users && Array.isArray(remoteData.users)) {
-                users = mergeCollections(users, remoteData.users);
-                saveToStorage(STORAGE_KEYS.USERS, users, false);
-            } else if (users && users.length > 0) {
-                pushToRemote(STORAGE_KEYS.USERS, users);
-            }
-
-            // 7. Maintenance
-            if (remoteData.maintenanceLogs && Array.isArray(remoteData.maintenanceLogs)) {
-                maintenanceLogs = mergeCollections(maintenanceLogs, remoteData.maintenanceLogs);
-                saveToStorage(STORAGE_KEYS.MAINTENANCE, maintenanceLogs, false);
-            } else if (maintenanceLogs && maintenanceLogs.length > 0) {
-                pushToRemote(STORAGE_KEYS.MAINTENANCE, maintenanceLogs);
-            }
-
-            // 8. Outsourced
-            if (remoteData.outsourcedBillboards && Array.isArray(remoteData.outsourcedBillboards)) {
-                outsourcedBillboards = mergeCollections(outsourcedBillboards, remoteData.outsourcedBillboards);
-                saveToStorage(STORAGE_KEYS.OUTSOURCED, outsourcedBillboards, false);
-            } else if (outsourcedBillboards && outsourcedBillboards.length > 0) {
-                pushToRemote(STORAGE_KEYS.OUTSOURCED, outsourcedBillboards);
-            }
-            
-            // Handle Company Profile & Logo (Single Objects, direct overwrite usually fine, but let's check nulls)
+            // Singleton objects: take remote wholesale when present.
             if (remoteData.company_profile) {
                 companyProfile = remoteData.company_profile;
                 saveToStorage(STORAGE_KEYS.PROFILE, companyProfile, false);
-            } else if (companyProfile) {
-                pushToRemote(STORAGE_KEYS.PROFILE, companyProfile);
             }
-
             if (remoteData.logo) {
                 companyLogo = remoteData.logo;
                 saveToStorage(STORAGE_KEYS.LOGO, companyLogo, false);
-            } else if (companyLogo) {
-                pushToRemote(STORAGE_KEYS.LOGO, companyLogo);
             }
-            
+
+            markSynced();
             if (shouldReload) {
                 console.log("Data synchronized from Backend.");
-                window.location.reload(); 
+                window.location.reload();
             }
             return { success: true, message: "Data synchronized successfully." };
         } else {
@@ -339,7 +360,6 @@ const saveToStorage = (key: string, data: any, sync = true): Promise<void> => {
     try {
         const serialized = JSON.stringify(data);
         localStorage.setItem(key, serialized);
-        if (sync) return pushToRemote(key, data); // Return the sync promise
     } catch (e: any) {
         console.error(`Error saving ${key}`, e);
         if (e.name === 'QuotaExceededError' || e.code === 22) {
@@ -347,6 +367,15 @@ const saveToStorage = (key: string, data: any, sync = true): Promise<void> => {
         } else {
             console.warn("Data save failed.");
         }
+        return Promise.resolve();
+    }
+    // Best-effort background push: local save already succeeded, so a
+    // network failure here should not reject upstream. Errors are logged
+    // for observability; forcePushToRemote is the path that reports status.
+    if (sync) {
+        return pushToRemote(key, data).catch(err => {
+            console.warn(`[sync] background push failed:`, err?.message || err);
+        });
     }
     return Promise.resolve();
 };
@@ -467,7 +496,7 @@ const storedVersion = localStorage.getItem(STORAGE_KEYS.DATA_VERSION);
 export let invoices: Invoice[] = loadFromStorage(STORAGE_KEYS.INVOICES, []) || [];
 export let expenses: Expense[] = loadFromStorage(STORAGE_KEYS.EXPENSES, []) || [];
 export let auditLogs: AuditLogEntry[] = loadFromStorage(STORAGE_KEYS.LOGS, [
-    { id: 'log-init', timestamp: new Date().toLocaleString(), action: 'System Init', details: 'System started', user: 'System' }
+    { id: 'log-init', timestamp: new Date().toISOString(), action: 'System Init', details: 'System started', user: 'System' }
 ]) || [];
 
 export let outsourcedBillboards: OutsourcedBillboard[] = loadFromStorage(STORAGE_KEYS.OUTSOURCED, []) || [];
@@ -532,26 +561,92 @@ const attemptDataRecovery = () => {
         }
         
         if (restored) {
-            const log: AuditLogEntry = { 
-                id: `log-heal-${Date.now()}`, 
-                timestamp: new Date().toLocaleString(), 
-                action: 'System Recovery', 
-                details: 'Automatically restored data from backup after update check.', 
-                user: 'System' 
+            const log: AuditLogEntry = {
+                id: `log-heal-${Date.now()}`,
+                timestamp: new Date().toISOString(),
+                action: 'System Recovery',
+                details: 'Automatically restored data from backup after update check.',
+                user: 'System'
             };
-            auditLogs = [log, ...auditLogs];
-            saveToStorage(STORAGE_KEYS.LOGS, auditLogs);
+            auditLogs = [log, ...auditLogs].slice(0, 10_000);
+            saveToStorage(STORAGE_KEYS.LOGS, auditLogs, false);
         }
     }
 };
 
 attemptDataRecovery();
 
+// Cap the local mirror so long-running tabs don't exhaust the ~5-10 MB
+// localStorage quota. The authoritative record lives server-side in the
+// audit_logs Postgres table — the client copy is just a fast read-through
+// cache for the Audit tab.
+const LOCAL_AUDIT_CAP = 10_000;
+
+const genLogId = (): string => {
+    try { if (typeof crypto !== 'undefined' && crypto.randomUUID) return `log-${crypto.randomUUID()}`; } catch { /* ignore */ }
+    return `log-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+};
+
+// Fire-and-forget forward to the server. Runs in background — if the network
+// is down or the user is anonymous, we still have the localStorage entry and
+// will eventually sync on reconnect.
+const forwardLogToServer = async (action: string, details: string) => {
+    try {
+        const { url, key } = getApiConfig();
+        if (!url) return; // No API configured; local-only mode.
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (key) headers['Authorization'] = `Bearer ${key}`;
+        await fetch(`${url}/audit/log`, {
+            method: 'POST',
+            headers,
+            credentials: 'include',
+            body: JSON.stringify({ action, details }),
+        });
+    } catch { /* best-effort */ }
+};
+
 export const logAction = (action: string, details: string) => {
     const who = currentUserRef?.email || 'System';
-    const log: AuditLogEntry = { id: `log-${Date.now()}`, timestamp: new Date().toLocaleString(), action, details, user: who };
-    auditLogs = [log, ...auditLogs];
-    saveToStorage(STORAGE_KEYS.LOGS, auditLogs);
+    const log: AuditLogEntry = {
+        id: genLogId(),
+        timestamp: new Date().toISOString(),
+        action,
+        details,
+        user: who,
+    };
+    auditLogs = [log, ...auditLogs].slice(0, LOCAL_AUDIT_CAP);
+    // sync=false: never push the raw logs array via /sync — the server
+    // rejects that collection. /audit/log is the only way logs reach the DB.
+    saveToStorage(STORAGE_KEYS.LOGS, auditLogs, false);
+    // Server forward is async and attribution-verified server-side — the
+    // server uses the session cookie to set actor_email, NOT `who` above.
+    forwardLogToServer(action, details);
+};
+
+// Fetch the server-side audit log. Admin-only endpoint; returns [] for any
+// non-admin caller. Used by the Settings → Audit tab to render the
+// authoritative record (vs. just this browser's localStorage mirror).
+export const fetchServerAuditLogs = async (limit = 500): Promise<AuditLogEntry[]> => {
+    const { url, key } = getApiConfig();
+    if (!url) return [];
+    try {
+        const headers: Record<string, string> = {};
+        if (key) headers['Authorization'] = `Bearer ${key}`;
+        const res = await fetch(`${url}/audit/log?limit=${limit}`, { headers, credentials: 'include' });
+        if (!res.ok) return [];
+        const data = await res.json();
+        return Array.isArray(data.logs)
+            ? data.logs.map((r: any): AuditLogEntry => ({
+                id: r.id,
+                timestamp: r.ts,
+                action: r.action,
+                details: [r.details, r.ip ? `ip=${r.ip}` : null, r.source ? `source=${r.source}` : null].filter(Boolean).join(' · '),
+                user: r.actor_email || r.actor_id || 'anon',
+            }))
+            : [];
+    } catch {
+        return [];
+    }
 };
 
 let companyLogo = loadFromStorage(STORAGE_KEYS.LOGO, null) || '';
@@ -885,21 +980,61 @@ export const getLastCloudSyncDate = () => lastCloudSyncDate;
 export const restoreSystemBackup = (jsonString: string): boolean => {
     try {
         const backup = JSON.parse(jsonString);
-        if(!backup.data) throw new Error("Invalid Backup Format");
-        
-        saveToStorage(STORAGE_KEYS.BILLBOARDS, backup.data.billboards || []);
-        saveToStorage(STORAGE_KEYS.CONTRACTS, backup.data.contracts || []);
-        saveToStorage(STORAGE_KEYS.CLIENTS, backup.data.clients || []);
-        saveToStorage(STORAGE_KEYS.INVOICES, backup.data.invoices || []);
-        saveToStorage(STORAGE_KEYS.EXPENSES, backup.data.expenses || []);
-        saveToStorage(STORAGE_KEYS.USERS, backup.data.users || []);
-        saveToStorage(STORAGE_KEYS.OUTSOURCED, backup.data.outsourcedBillboards || []);
-        saveToStorage(STORAGE_KEYS.LOGS, backup.data.auditLogs || []);
-        saveToStorage(STORAGE_KEYS.PRINTING, backup.data.printingJobs || []);
-        saveToStorage(STORAGE_KEYS.MAINTENANCE, backup.data.maintenanceLogs || []);
-        saveToStorage(STORAGE_KEYS.LOGO, backup.data.companyLogo || '');
-        saveToStorage(STORAGE_KEYS.PROFILE, backup.data.companyProfile || DEFAULT_PROFILE);
+        if (!backup || typeof backup !== 'object' || !backup.data || typeof backup.data !== 'object') {
+            throw new Error("Invalid Backup Format");
+        }
+        const d = backup.data;
 
+        // Each collection must be either absent or an array — reject malformed
+        // files outright instead of silently coercing to empty. The companyLogo
+        // and companyProfile fields are object/string; validate their shape too.
+        const arrayFields = [
+            'billboards', 'contracts', 'clients', 'invoices', 'expenses',
+            'users', 'outsourcedBillboards', 'auditLogs', 'printingJobs', 'maintenanceLogs'
+        ];
+        for (const f of arrayFields) {
+            if (d[f] !== undefined && !Array.isArray(d[f])) {
+                throw new Error(`Backup field "${f}" must be an array`);
+            }
+        }
+        if (d.companyLogo !== undefined && typeof d.companyLogo !== 'string') {
+            throw new Error('Backup field "companyLogo" must be a string');
+        }
+        if (d.companyProfile !== undefined && (typeof d.companyProfile !== 'object' || Array.isArray(d.companyProfile))) {
+            throw new Error('Backup field "companyProfile" must be an object');
+        }
+
+        // Sanitize users: strip any password/reset fields that a crafted backup
+        // might try to inject, and clamp role to the known enum. Server-side
+        // auth still owns credentials via /auth/*, so restoring a backup must
+        // never be able to set a login password or forge a role grant.
+        const validRoles = new Set(['Admin', 'Manager', 'Staff']);
+        const sanitizedUsers = (d.users || []).map((u: any) => {
+            if (!u || typeof u !== 'object') return u;
+            const { password, password_reset_token, password_reset_expires, ...rest } = u;
+            if (rest.role && !validRoles.has(rest.role)) rest.role = 'Staff';
+            return rest;
+        });
+
+        saveToStorage(STORAGE_KEYS.BILLBOARDS, d.billboards || []);
+        saveToStorage(STORAGE_KEYS.CONTRACTS, d.contracts || []);
+        saveToStorage(STORAGE_KEYS.CLIENTS, d.clients || []);
+        saveToStorage(STORAGE_KEYS.INVOICES, d.invoices || []);
+        saveToStorage(STORAGE_KEYS.EXPENSES, d.expenses || []);
+        saveToStorage(STORAGE_KEYS.USERS, sanitizedUsers);
+        saveToStorage(STORAGE_KEYS.OUTSOURCED, d.outsourcedBillboards || []);
+        // Don't sync-push the restored logs — the server rejects that
+        // collection. The authoritative audit trail is server-side; the
+        // restore is logged separately via logAction below.
+        saveToStorage(STORAGE_KEYS.LOGS, d.auditLogs || [], false);
+        saveToStorage(STORAGE_KEYS.PRINTING, d.printingJobs || []);
+        saveToStorage(STORAGE_KEYS.MAINTENANCE, d.maintenanceLogs || []);
+        saveToStorage(STORAGE_KEYS.LOGO, d.companyLogo || '');
+        saveToStorage(STORAGE_KEYS.PROFILE, d.companyProfile || DEFAULT_PROFILE);
+
+        // The restore just overwrote the local audit mirror — record the
+        // restore itself server-side so forensics can see the overwrite.
+        logAction('System Restore', `Restored backup (${(d.auditLogs || []).length} prior log entries replaced)`);
         return true;
     } catch(e) {
         console.error("Restore failed:", e);
@@ -973,6 +1108,10 @@ export const getCompanyLogo = () => companyLogo;
 export const getCompanyProfile = () => companyProfile;
 
 export const resetSystemData = () => {
+    // Log BEFORE clearing — localStorage.clear() wipes the local audit mirror,
+    // but forwardLogToServer fires async to /audit/log which persists in Neon
+    // even after the local state is blown away.
+    logAction('System Reset', 'User cleared local state (localStorage.clear + reload)');
     localStorage.clear();
     window.location.reload();
 };

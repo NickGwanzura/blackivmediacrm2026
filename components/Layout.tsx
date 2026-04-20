@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   LayoutDashboard, Map, Users, FileText, CreditCard, Receipt, Settings as SettingsIcon,
-  Menu, X, Bell, LogOut, Printer, Globe, PieChart, Wallet, ChevronRight, Wrench, AlertTriangle, Calendar, AlertCircle, RefreshCw
+  Menu, X, Bell, LogOut, Printer, Globe, PieChart, Wallet, ChevronRight, Wrench, AlertTriangle, Calendar, AlertCircle, RefreshCw, ClipboardList, Target
 } from 'lucide-react';
 import { getCurrentUser, logout } from '../services/authService';
 import { getSystemAlertCount, triggerAutoBackup, runAutoBilling, runMaintenanceScheduler, syncBillboardAvailability, RELEASE_NOTES, getExpiringContracts, getOverdueInvoices, getMaintenanceLogs, getBillboards, pullFromRemote } from '../services/mockData';
@@ -68,10 +68,13 @@ export const Layout: React.FC<LayoutProps> = ({ children, currentPage, onNavigat
     const maintenanceInterval = setInterval(() => runMaintenanceScheduler(), 24 * 60 * 60 * 1000); // Daily check
     const availabilityInterval = setInterval(() => syncBillboardAvailability(), 60 * 60 * 1000); // Hourly check for expired contracts
 
-    // AUTO-CLOUD POLL: Aggressive Polling (5s) for Smart Sync
+    // AUTO-CLOUD POLL: background sync every 60s, paused when the tab is
+    // hidden to avoid flooding the API (10 users × 2 tabs at 5s = 240 req/min).
+    // The `focus` listener above still triggers an immediate sync the moment
+    // the user comes back, so UX perceived-latency stays low.
     const cloudSyncInterval = setInterval(() => {
-        runSmartSync();
-    }, 5000);
+        if (document.visibilityState === 'visible') runSmartSync();
+    }, 60 * 1000);
 
     return () => { 
         clearInterval(interval); 
@@ -90,11 +93,13 @@ export const Layout: React.FC<LayoutProps> = ({ children, currentPage, onNavigat
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'analytics', label: 'Profit & Analytics', icon: PieChart },
     { id: 'billboards', label: 'Billboards', icon: Map },
+    { id: 'availability', label: 'Availability', icon: ClipboardList },
     { id: 'maintenance', label: 'Maintenance', icon: Wrench },
     { id: 'rentals', label: 'Rentals', icon: FileText },
     { id: 'outsourced', label: 'Outsourced', icon: Globe },
     { id: 'payments', label: 'Payments', icon: Wallet },
     { id: 'clients', label: 'Clients', icon: Users },
+    { id: 'crm', label: 'CRM', icon: Target },
     { id: 'financials', label: 'Invoices & Quotes', icon: CreditCard },
     { id: 'receipts', label: 'Receipts', icon: Receipt },
     { id: 'expenses', label: 'Expenses', icon: Printer },

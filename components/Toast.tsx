@@ -26,6 +26,10 @@ interface ToastApi {
   info: (message: string, title?: string) => string;
   dismiss: (id: string) => void;
   confirm: (opts: ConfirmOptions | string) => Promise<boolean>;
+  // showToast is a legacy-style convenience (Dreambox-origin CRM module) that
+  // picks the right variant based on type. Retained so ported components can
+  // consume `useToast()` without edits.
+  showToast: (message: string, type?: ToastVariant, durationMs?: number) => string;
 }
 
 const ToastContext = createContext<ToastApi | null>(null);
@@ -38,6 +42,7 @@ export const toast: ToastApi = {
   info:    (m, t) => imperativeApi ? imperativeApi.info(m, t)    : (console.warn('[toast]', m), ''),
   dismiss: (id) => imperativeApi?.dismiss(id),
   confirm: (opts) => imperativeApi ? imperativeApi.confirm(opts) : Promise.resolve(window.confirm(typeof opts === 'string' ? opts : opts.message)),
+  showToast: (m, type = 'info') => imperativeApi ? imperativeApi.showToast(m, type) : (console.warn('[toast]', m), ''),
 };
 
 const DEFAULT_DURATION = 4200;
@@ -169,6 +174,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     info:    (m, t) => push('info',    m, t),
     dismiss,
     confirm,
+    showToast: (m, type = 'info') => push(type, m),
   }), [push, dismiss, confirm]);
 
   useEffect(() => {

@@ -974,6 +974,122 @@ export const generateMaintenanceReportPDF = (billboards: Billboard[], logs: Main
     }
 };
 
+export interface AvailabilityReportRow {
+    name: string;
+    location: string;
+    type: string;
+    capacity: number;
+    rented: number;
+    available: number;
+    status: string; // 'Available' | 'Partial' | 'Fully Booked'
+    detail: string;
+}
+
+export interface AvailabilityReportTotals {
+    totalCapacity: number;
+    totalRented: number;
+    totalAvailable: number;
+    occupancy: number;
+}
+
+export const generateAvailabilityReportPDF = (
+    rows: AvailabilityReportRow[],
+    totals: AvailabilityReportTotals,
+    townBreakdown: { town: string; capacity: number; rented: number }[],
+) => {
+    try {
+        const doc = new jsPDF();
+        let currentY = addCompanyHeader(doc);
+
+        doc.setFontSize(22);
+        doc.setTextColor(COLOR_PRIMARY[0], COLOR_PRIMARY[1], COLOR_PRIMARY[2]);
+        doc.setFont('helvetica', 'bold');
+        doc.text('AVAILABILITY REPORT', 14, currentY);
+
+        currentY += 8;
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(COLOR_TEXT_LIGHT[0], COLOR_TEXT_LIGHT[1], COLOR_TEXT_LIGHT[2]);
+        doc.text(`Generated: ${new Date().toLocaleDateString()}`, 14, currentY);
+
+        currentY += 15;
+
+        // KPIs
+        doc.setFontSize(11);
+        doc.setTextColor(COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2]);
+        doc.text(`Capacity: ${totals.totalCapacity}`, 14, currentY);
+        doc.text(`Rented: ${totals.totalRented}`, 70, currentY);
+        doc.text(`Available: ${totals.totalAvailable}`, 120, currentY);
+        doc.text(`Occupancy: ${totals.occupancy.toFixed(1)}%`, 170, currentY);
+
+        currentY += 10;
+
+        // Town breakdown
+        if (townBreakdown.length > 0) {
+            runAutoTable(doc, {
+                startY: currentY,
+                head: [['Town', 'Capacity', 'Rented', 'Available', 'Occupancy']],
+                body: townBreakdown.map(t => [
+                    t.town,
+                    String(t.capacity),
+                    String(t.rented),
+                    String(t.capacity - t.rented),
+                    `${t.capacity > 0 ? ((t.rented / t.capacity) * 100).toFixed(1) : '0.0'}%`,
+                ]),
+                theme: 'grid',
+                headStyles: { fillColor: COLOR_PRIMARY, textColor: 255, fontSize: 9 },
+                styles: { fontSize: 8, cellPadding: 3 },
+                margin: { left: 14, right: 14 },
+            });
+            currentY = (doc as any).lastAutoTable.finalY + 10;
+        }
+
+        // Per-asset table
+        runAutoTable(doc, {
+            startY: currentY,
+            head: [['Asset', 'Location', 'Type', 'Cap', 'Rented', 'Free', 'Status', 'Detail']],
+            body: rows.map(r => [
+                r.name,
+                r.location,
+                r.type,
+                String(r.capacity),
+                String(r.rented),
+                String(r.available),
+                r.status,
+                r.detail,
+            ]),
+            theme: 'grid',
+            headStyles: { fillColor: COLOR_PRIMARY, textColor: 255, fontSize: 9 },
+            styles: { fontSize: 8, cellPadding: 3, overflow: 'linebreak' },
+            columnStyles: {
+                0: { fontStyle: 'bold', cellWidth: 30 },
+                1: { cellWidth: 40 },
+                2: { cellWidth: 14 },
+                3: { cellWidth: 12, halign: 'right' },
+                4: { cellWidth: 14, halign: 'right' },
+                5: { cellWidth: 14, halign: 'right' },
+                6: { cellWidth: 20, fontStyle: 'bold' },
+                7: { cellWidth: 'auto' },
+            },
+            didParseCell: (data: any) => {
+                if (data.section !== 'body' || data.column.index !== 6) return;
+                const text = data.cell.text[0];
+                if (text === 'Available') data.cell.styles.textColor = [22, 163, 74];
+                else if (text === 'Partial') data.cell.styles.textColor = [217, 119, 6];
+                else if (text === 'Fully Booked') data.cell.styles.textColor = [220, 38, 38];
+            },
+            didDrawPage: (data: any) => {
+                addFooter(doc, data.pageNumber, 'Confidential Availability Report');
+            },
+        });
+
+        doc.save(`Availability_Report_${new Date().toISOString().slice(0, 10)}.pdf`);
+    } catch (e) {
+        console.error('Report Generation Failed', e);
+        toast.error('Failed to generate availability report.');
+    }
+};
+
 export const generateFeaturesPDF = () => {
     try {
         const doc = new jsPDF();

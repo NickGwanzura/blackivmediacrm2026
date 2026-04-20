@@ -323,8 +323,13 @@ function constantTimeEquals(a, b) {
 }
 
 // ---- Router ----
-function createAuthRouter({ resendClient, getCompanyName }) {
+function createAuthRouter({ resendClient, getCompanyName, writeAudit }) {
   const router = express.Router();
+
+  // Fallback so unwired callers still work in tests or during boot.
+  const audit = typeof writeAudit === 'function'
+    ? writeAudit
+    : () => Promise.resolve(null);
 
   router.post('/login', async (req, res) => {
     const { email, password } = req.body || {};
@@ -336,19 +341,31 @@ function createAuthRouter({ resendClient, getCompanyName }) {
         // real login would, so response timing doesn't reveal whether the
         // email exists. Ignore the result.
         try { await bcrypt.compare(password, DUMMY_HASH); } catch { /* ignore */ }
+        audit({ req, action: 'login.fail', details: `email="${email}" reason=unknown_email` });
         return res.status(401).json({ error: 'Invalid email or password' });
       }
       const ok = await comparePassword(row, password);
-      if (!ok) return res.status(401).json({ error: 'Invalid email or password' });
-      if (row.status === 'Pending') return res.status(403).json({ error: 'Awaiting administrator approval' });
-      if (row.status === 'Denied') return res.status(403).json({ error: 'Account has been suspended' });
+      if (!ok) {
+        audit({ req, action: 'login.fail', actor: { id: row.id, email: row.email, role: row.role }, details: 'bad password' });
+        return res.status(401).json({ error: 'Invalid email or password' });
+      }
+      if (row.status === 'Pending') {
+        audit({ req, action: 'login.denied', actor: { id: row.id, email: row.email, role: row.role }, details: 'account Pending' });
+        return res.status(403).json({ error: 'Awaiting administrator approval' });
+      }
+      if (row.status === 'Denied') {
+        audit({ req, action: 'login.denied', actor: { id: row.id, email: row.email, role: row.role }, details: 'account Denied' });
+        return res.status(403).json({ error: 'Account has been suspended' });
+      }
       // Re-fetch so we return the freshly-upgraded password_hash state.
       const fresh = await findUserById(row.id);
       const user = toClientUser(fresh);
       issueSessionCookie(res, req, user, fresh.session_epoch || 1);
+      audit({ req, action: 'login.success', actor: user });
       return res.json({ user });
     } catch (e) {
       console.error('[auth] /login error:', e);
+      audit({ req, action: 'login.error', details: e.message });
       return res.status(500).json({ error: 'Login failed' });
     }
   });
@@ -371,7 +388,9 @@ function createAuthRouter({ resendClient, getCompanyName }) {
         [id, firstName, lastName, email, 'Manager', hash, 'Pending', false],
       );
       const row = await findUserById(id);
-      return res.status(201).json({ user: toClientUser(row) });
+      const user = toClientUser(row);
+      audit({ req, action: 'user.register', actor: user, details: 'self-registered (Pending)' });
+      return res.status(201).json({ user });
     } catch (e) {
       // Catch unique-violation from the lower-cased unique index.
       if (/duplicate key|unique/i.test(e.message)) {
@@ -407,6 +426,17 @@ function createAuthRouter({ resendClient, getCompanyName }) {
   });
 
   router.post('/logout', (req, res) => {
+    // Best-effort: decode the cookie we're about to clear so we can attribute
+    // the logout. No DB lookup — the cookie payload is sufficient.
+    try {
+      const token = req.cookies ? req.cookies[COOKIE_NAME] : null;
+      const payload = token ? verifyToken(token) : null;
+      if (payload) {
+        audit({ req, action: 'logout', actor: { id: payload.sub, email: payload.email, role: payload.role } });
+      } else {
+        audit({ req, action: 'logout', details: 'no session' });
+      }
+    } catch { /* never block logout on audit */ }
     clearSessionCookie(res, req);
     return res.status(204).end();
   });
@@ -459,6 +489,10 @@ function createAuthRouter({ resendClient, getCompanyName }) {
           footnote: `This link expires in one hour. If you didn't request a reset, you can safely ignore this email &mdash; no changes will be made.`,
         });
         await sendAuthEmail(resendClient, { to: row.email, subject: `Reset your ${sender} password`, html });
+        audit({ req, action: 'reset.request', actor: { id: row.id, email: row.email, role: row.role }, details: 'reset email sent' });
+      } else if (!row) {
+        // Still log the attempt (no actor) so scraping attempts are visible.
+        audit({ req, action: 'reset.request.unknown_email', details: `email="${email}"` });
       }
     } catch (e) {
       console.warn('[auth] /reset-request non-fatal:', e.message);
@@ -502,6 +536,7 @@ function createAuthRouter({ resendClient, getCompanyName }) {
       const fresh = await findUserById(row.id);
       const user = toClientUser(fresh);
       issueSessionCookie(res, req, user, fresh.session_epoch || 1);
+      audit({ req, action: 'reset.confirm', actor: user, details: 'password reset via token' });
       return res.json({ user });
     } catch (e) {
       console.error('[auth] /reset-confirm error:', e);
@@ -530,6 +565,7 @@ function createAuthRouter({ resendClient, getCompanyName }) {
       const fresh = await findUserById(row.id);
       const user = toClientUser(fresh);
       issueSessionCookie(res, req, user, fresh.session_epoch || 1);
+      audit({ req, action: 'password.change', actor: user });
       return res.json({ user });
     } catch (e) {
       console.error('[auth] /change-password error:', e);
@@ -562,7 +598,9 @@ function createAuthRouter({ resendClient, getCompanyName }) {
         await sendAuthEmail(resendClient, { to: row.email, subject: `Account approved — welcome to ${sender}`, html });
       }
       const fresh = await findUserById(userId);
-      return res.json({ user: toClientUser(fresh) });
+      const approved = toClientUser(fresh);
+      audit({ req, action: 'user.approve', details: `approved user ${approved.email} (role=${approved.role})` });
+      return res.json({ user: approved });
     } catch (e) {
       console.error('[auth] /approve error:', e);
       return res.status(500).json({ error: 'Approval failed' });
@@ -610,7 +648,9 @@ function createAuthRouter({ resendClient, getCompanyName }) {
         await sendAuthEmail(resendClient, { to: email, subject: `You've been invited to ${sender}`, html });
       }
       const fresh = await findUserById(id);
-      return res.status(201).json({ user: toClientUser(fresh) });
+      const invited = toClientUser(fresh);
+      audit({ req, action: 'user.invite', details: `invited ${invited.email} as ${invited.role}` });
+      return res.status(201).json({ user: invited });
     } catch (e) {
       if (/duplicate key|unique/i.test(e.message)) {
         return res.status(409).json({ error: 'Email already registered' });
