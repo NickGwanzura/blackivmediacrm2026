@@ -5,23 +5,9 @@ import { useToast } from './Toast';
 import { generateInvoicePDF } from '../services/pdfGenerator';
 import { FileText, Download, Printer, Plus, Save, Link2, CreditCard, Search, ChevronRight, Wrench, Palette } from 'lucide-react';
 import { AccessibleModal, ModalButton } from './ui/AccessibleModal';
+import { FormInput, FormSelect, FormTextArea, FormSection, FormRow, FormNumber, FormDate, FormCheckbox } from './ui/Form';
 import { Invoice, VAT_RATE, Currency, CURRENCIES } from '../types';
 import { formatCurrency } from '../utils/sanitizers';
-
-const MinimalInput = ({ label, value, onChange, type = "text", required = false }: any) => (
-    <div className="group relative">
-      <input type={type} required={required} value={value} onChange={onChange} placeholder=" " className="peer w-full px-0 py-2.5 border-b border-slate-200 bg-transparent text-slate-800 focus:border-slate-800 focus:ring-0 outline-none transition-all font-medium placeholder-transparent" />
-      <label className="absolute left-0 -top-2.5 text-xs text-slate-400 font-medium transition-all peer-placeholder-shown:text-sm peer-placeholder-shown:text-slate-400 peer-placeholder-shown:top-2.5 peer-focus:-top-2.5 peer-focus:text-xs peer-focus:text-slate-800 uppercase tracking-wide">{label}</label>
-    </div>
-  );
-const MinimalSelect = ({ label, value, onChange, options }: any) => (
-    <div className="group relative">
-      <select value={value} onChange={onChange} className="peer w-full px-0 py-2.5 border-b border-slate-200 bg-transparent text-slate-800 focus:border-slate-800 focus:ring-0 outline-none transition-all font-medium appearance-none cursor-pointer" >
-        {options.map((opt: any) => (<option key={opt.value} value={opt.value}>{opt.label}</option>))}
-      </select>
-      <label className="absolute left-0 -top-2.5 text-xs text-slate-400 font-medium uppercase tracking-wide">{label}</label>
-    </div>
-  );
 
 interface FinancialsProps { initialTab?: 'Invoices' | 'Quotations' | 'Receipts'; }
 
@@ -207,46 +193,65 @@ export const Financials: React.FC<FinancialsProps> = ({ initialTab = 'Invoices' 
         }
       >
         <form id="financial-doc-form" onSubmit={handleCreate} className="space-y-6">
-          {activeTab === 'Receipts' && (<div className="p-4 bg-green-50 rounded-xl border border-green-100 mb-2"><MinimalSelect label="Link to Pending Invoice" value={selectedInvoiceToPay} onChange={(e: any) => handleInvoiceSelect(e.target.value)} options={[{value: '', label: 'Select Invoice to Pay...'}, ...getInvoices().filter(i => i.status === 'Pending' && i.type === 'Invoice').map(i => ({ value: i.id, label: `Inv #${i.id} — ${formatCurrency(i.total, i.currency)} (${mockClients.find(c => c.id === i.clientId)?.companyName})`}))]}/></div>)}
-          {activeTab !== 'Receipts' && (<div className="p-4 bg-indigo-50 rounded-xl border border-indigo-100 mb-2"><MinimalSelect label="Link to Active Rental (Optional)" value={formData.contractId} onChange={(e: any) => handleRentalSelect(e.target.value)} options={[{value: '', label: 'Select Rental to Auto-fill...'}, ...getContracts().map(c => { const client = mockClients.find(cl => cl.id === c.clientId); const billboard = getBillboards().find(b => b.id === c.billboardId); return {value: c.id, label: `${client?.companyName} - ${billboard?.name} (${c.details})`};})]}/></div>)}
-          <div className="grid grid-cols-2 gap-6"><MinimalSelect label="Client" value={formData.clientId} onChange={(e: any) => setFormData({...formData, clientId: e.target.value})} options={[{value: '', label: 'Select Client...'}, ...mockClients.map(c => ({value: c.id, label: c.companyName}))]}/><MinimalInput label="Date" type="date" value={formData.date} onChange={(e: any) => setFormData({...formData, date: e.target.value})} /></div>
-          {/* Dual-currency selector: receipts inherit from the paid invoice
-              (disabled below when an invoice is linked) so payment ledgers
-              never mix denominations. For Invoice / Quotation docs the user
-              picks; the linked contract's currency pre-fills it. */}
-          <div className="grid grid-cols-2 gap-6">
-            <MinimalSelect
+          {activeTab === 'Receipts' && (
+            <div className="p-4 bg-green-50 rounded-xl border border-green-100 mb-2">
+              <FormSelect label="Link to Pending Invoice" value={selectedInvoiceToPay} onChange={(e) => handleInvoiceSelect(e.target.value)} options={[{value: '', label: 'Select Invoice to Pay...'}, ...getInvoices().filter(i => i.status === 'Pending' && i.type === 'Invoice').map(i => ({ value: i.id, label: `Inv #${i.id} — ${formatCurrency(i.total, i.currency)} (${mockClients.find(c => c.id === i.clientId)?.companyName})`}))]} />
+            </div>
+          )}
+          {activeTab !== 'Receipts' && (
+            <div className="p-4 bg-indigo-50 rounded-xl border border-indigo-100 mb-2">
+              <FormSelect label="Link to Active Rental (Optional)" value={formData.contractId} onChange={(e) => handleRentalSelect(e.target.value)} options={[{value: '', label: 'Select Rental to Auto-fill...'}, ...getContracts().map(c => { const client = mockClients.find(cl => cl.id === c.clientId); const billboard = getBillboards().find(b => b.id === c.billboardId); return {value: c.id, label: `${client?.companyName} - ${billboard?.name} (${c.details})`};})]} />
+            </div>
+          )}
+
+          <FormSection title="Document Info">
+            <FormSelect label="Client" value={formData.clientId} onChange={(e) => setFormData({...formData, clientId: e.target.value})} options={[{value: '', label: 'Select Client...'}, ...mockClients.map(c => ({value: c.id, label: c.companyName}))]} />
+            <FormDate label="Date" value={formData.date} onChange={(e) => setFormData({...formData, date: e.target.value})} />
+            {/* Dual-currency selector: receipts inherit from the paid invoice
+                (disabled below when an invoice is linked) so payment ledgers
+                never mix denominations. For Invoice / Quotation docs the user
+                picks; the linked contract's currency pre-fills it. */}
+            <FormSelect
               label="Currency"
               value={formData.currency || 'USD'}
-              onChange={(e: any) => setFormData({...formData, currency: e.target.value as Currency})}
+              onChange={(e) => setFormData({...formData, currency: e.target.value as Currency})}
               options={CURRENCIES.map(c => ({ value: c, label: c }))}
             />
-          </div>
-          {activeTab === 'Receipts' && (<div className="grid grid-cols-2 gap-6"><MinimalSelect label="Payment Method" value={formData.paymentMethod} onChange={(e: any) => setFormData({...formData, paymentMethod: e.target.value})} options={[{value: 'Bank Transfer', label: 'Bank Transfer'},{value: 'Cash', label: 'Cash'},{value: 'EcoCash', label: 'EcoCash'},{value: 'Other', label: 'Other'}]}/><MinimalInput label="Reference Number" value={formData.paymentReference} onChange={(e: any) => setFormData({...formData, paymentReference: e.target.value})} /></div>)}
+          </FormSection>
 
-          {/* Additional Cost Fields */}
+          {activeTab === 'Receipts' && (
+            <FormSection title="Payment Details">
+              <FormSelect label="Payment Method" value={formData.paymentMethod} onChange={(e) => setFormData({...formData, paymentMethod: e.target.value})} options={[{value: 'Bank Transfer', label: 'Bank Transfer'},{value: 'Cash', label: 'Cash'},{value: 'EcoCash', label: 'EcoCash'},{value: 'Other', label: 'Other'}]} />
+              <FormInput label="Reference Number" value={formData.paymentReference} onChange={(e) => setFormData({...formData, paymentReference: e.target.value})} />
+            </FormSection>
+          )}
+
           {activeTab !== 'Receipts' && (
-            <div className="grid grid-cols-2 gap-6">
+            <FormSection title="Additional Costs">
               <div className="flex items-end gap-2">
                 <div className="flex-1">
-                  <MinimalInput label={`Installation Cost (${formData.currency || 'USD'})`} type="number" value={formData.installCost} onChange={(e: any) => setFormData({...formData, installCost: e.target.value})} />
+                  <FormNumber label={`Installation Cost (${formData.currency || 'USD'})`} value={formData.installCost} onChange={(e) => setFormData({...formData, installCost: e.target.value})} />
                 </div>
                 <Wrench size={20} className="text-slate-300 mb-3"/>
               </div>
               <div className="flex items-end gap-2">
                 <div className="flex-1">
-                  <MinimalInput label={`Printing Cost (${formData.currency || 'USD'})`} type="number" value={formData.printCost} onChange={(e: any) => setFormData({...formData, printCost: e.target.value})} />
+                  <FormNumber label={`Printing Cost (${formData.currency || 'USD'})`} value={formData.printCost} onChange={(e) => setFormData({...formData, printCost: e.target.value})} />
                 </div>
                 <Palette size={20} className="text-slate-300 mb-3"/>
               </div>
-            </div>
+            </FormSection>
           )}
 
           <div className="bg-slate-50 rounded-2xl p-6 space-y-4 border border-slate-100">
             <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Line Items</h4>
             <div className="flex gap-3">
-              <div className="flex-1"><MinimalInput label="Description" value={newItem.description} onChange={(e: any) => setNewItem({...newItem, description: e.target.value})} /></div>
-              <div className="w-32"><MinimalInput label={`Amount (${formData.currency || 'USD'})`} type="number" value={newItem.amount} onChange={(e: any) => setNewItem({...newItem, amount: Number(e.target.value)})} /></div>
+              <div className="flex-1">
+                <FormInput label="Description" value={newItem.description} onChange={(e) => setNewItem({...newItem, description: e.target.value})} />
+              </div>
+              <div className="w-32">
+                <FormNumber label={`Amount (${formData.currency || 'USD'})`} value={newItem.amount} onChange={(e) => setNewItem({...newItem, amount: Number(e.target.value)})} />
+              </div>
               <button type="button" onClick={addItem} className="bg-slate-900 text-white rounded-xl px-4 mt-2 hover:bg-slate-800"><Plus size={18}/></button>
             </div>
             {(formData.items && formData.items.length > 0) || formData.installCost > 0 || formData.printCost > 0 ? (
@@ -259,9 +264,9 @@ export const Financials: React.FC<FinancialsProps> = ({ initialTab = 'Invoices' 
               </div>
             ) : null}
           </div>
-          <div className="flex items-center gap-2">
-            <input type="checkbox" checked={hasVat} disabled={activeTab === 'Receipts' && !!selectedInvoiceToPay} onChange={e => setHasVat(e.target.checked)} className="rounded border-slate-300 text-slate-900 focus:ring-slate-900" />
-            <label className="text-sm font-medium text-slate-600">Include VAT (15%)</label>
+
+          <div className={activeTab === 'Receipts' && !!selectedInvoiceToPay ? 'opacity-50 pointer-events-none' : ''}>
+            <FormCheckbox label="Include VAT (15%)" checked={hasVat} onChange={(checked) => setHasVat(checked)} />
           </div>
         </form>
       </AccessibleModal>

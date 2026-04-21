@@ -5,13 +5,9 @@ import { getClients, addClient, deleteClient, updateClient, getNextBillingDetail
 import { generateActiveClientsPDF } from '../services/pdfGenerator';
 import { Mail, Phone, MoreHorizontal, User, Plus, Save, Search, Trash2, Calendar, Clock, Edit2, CreditCard, FileDown, UserPlus, PencilLine } from 'lucide-react';
 import { AccessibleModal, ModalButton } from './ui/AccessibleModal';
+import { FormInput, FormNumber, FormSection } from './ui/Form';
 
-const MinimalInput = ({ label, value, onChange, type = "text", placeholder, required = false, max, min, step }: any) => (
-  <div className="group relative">
-    <input type={type} required={required} value={value} onChange={onChange} max={max} min={min} step={step} placeholder=" " className="peer w-full px-0 py-2.5 border-b border-slate-200 bg-transparent text-slate-800 focus:border-slate-800 focus:ring-0 outline-none transition-all font-medium placeholder-transparent" />
-    <label className="absolute left-0 -top-2.5 text-xs text-slate-400 font-medium transition-all peer-placeholder-shown:text-sm peer-placeholder-shown:text-slate-400 peer-placeholder-shown:top-2.5 peer-focus:-top-2.5 peer-focus:text-xs peer-focus:text-slate-800 uppercase tracking-wide">{label}</label>
-  </div>
-);
+
 
 export const ClientList: React.FC = () => {
   const [clients, setClients] = useState<Client[]>(getClients());
@@ -112,14 +108,14 @@ export const ClientList: React.FC = () => {
           </>
         }
       >
-        <form id="add-client-form" onSubmit={handleAddClient} className="space-y-8">
-          <MinimalInput label="Company Name" value={newClient.companyName} onChange={(e: any) => setNewClient({...newClient, companyName: e.target.value})} required />
-          <MinimalInput label="Contact Person" value={newClient.contactPerson} onChange={(e: any) => setNewClient({...newClient, contactPerson: e.target.value})} required />
-          <MinimalInput label="Email Address" type="email" value={newClient.email} onChange={(e: any) => setNewClient({...newClient, email: e.target.value})} required />
-          <div className="grid grid-cols-2 gap-6">
-            <MinimalInput label="Phone Number" type="tel" value={newClient.phone} onChange={(e: any) => setNewClient({...newClient, phone: e.target.value})} />
-            <MinimalInput label="Billing Day (1-31)" type="number" min={1} max={31} value={newClient.billingDay || ''} onChange={(e: any) => setNewClient({...newClient, billingDay: e.target.value ? Number(e.target.value) : undefined})} />
-          </div>
+        <form id="add-client-form" onSubmit={handleAddClient} className="space-y-6">
+          <FormSection title="Company Information">
+            <FormInput label="Company Name" value={newClient.companyName || ''} onChange={(e: any) => setNewClient({...newClient, companyName: e.target.value})} required />
+            <FormInput label="Contact Person" value={newClient.contactPerson || ''} onChange={(e: any) => setNewClient({...newClient, contactPerson: e.target.value})} required />
+            <FormInput label="Email Address" type="email" value={newClient.email || ''} onChange={(e: any) => setNewClient({...newClient, email: e.target.value})} required />
+            <FormInput label="Phone Number" type="tel" value={newClient.phone || ''} onChange={(e: any) => setNewClient({...newClient, phone: e.target.value})} />
+            <FormNumber label="Billing Day (1-31)" min={1} max={31} value={newClient.billingDay || ''} onChange={(e: any) => setNewClient({...newClient, billingDay: e.target.value ? Number(e.target.value) : undefined})} />
+          </FormSection>
         </form>
       </AccessibleModal>
       
@@ -138,24 +134,21 @@ export const ClientList: React.FC = () => {
           </>
         }
       >
-        <form id="edit-client-form" onSubmit={handleUpdateClient} className="space-y-8">
+        <form id="edit-client-form" onSubmit={handleUpdateClient} className="space-y-6">
           {editingClient && (
             <>
-              <div className="space-y-6">
-                <MinimalInput label="Company Name" value={editingClient.companyName} onChange={(e: any) => setEditingClient({...editingClient, companyName: e.target.value})} required />
-                <MinimalInput label="Contact Person" value={editingClient.contactPerson} onChange={(e: any) => setEditingClient({...editingClient, contactPerson: e.target.value})} required />
-                <div className="grid grid-cols-2 gap-6">
-                  <MinimalInput label="Email Address" type="email" value={editingClient.email} onChange={(e: any) => setEditingClient({...editingClient, email: e.target.value})} required />
-                  <MinimalInput label="Phone Number" type="tel" value={editingClient.phone} onChange={(e: any) => setEditingClient({...editingClient, phone: e.target.value})} />
-                </div>
-              </div>
-              <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 space-y-4">
-                <div className="flex items-center gap-2 mb-2"><CreditCard className="text-slate-400" size={18} /><h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">Billing Preferences</h4></div>
-                <div className="grid grid-cols-1 gap-6">
-                  <MinimalInput label="Preferred Billing Day (1-31)" type="number" min={1} max={31} value={editingClient.billingDay || ''} onChange={(e: any) => setEditingClient({...editingClient, billingDay: e.target.value ? Number(e.target.value) : undefined})} placeholder="Default: Contract Start Date" />
+              <FormSection title="Company Information">
+                <FormInput label="Company Name" value={editingClient.companyName} onChange={(e: any) => setEditingClient({...editingClient, companyName: e.target.value})} required />
+                <FormInput label="Contact Person" value={editingClient.contactPerson} onChange={(e: any) => setEditingClient({...editingClient, contactPerson: e.target.value})} required />
+                <FormInput label="Email Address" type="email" value={editingClient.email} onChange={(e: any) => setEditingClient({...editingClient, email: e.target.value})} required />
+                <FormInput label="Phone Number" type="tel" value={editingClient.phone} onChange={(e: any) => setEditingClient({...editingClient, phone: e.target.value})} />
+              </FormSection>
+              <FormSection title="Billing Preferences" icon={<CreditCard size={16} />}>
+                <FormNumber label="Preferred Billing Day (1-31)" min={1} max={31} value={editingClient.billingDay || ''} onChange={(e: any) => setEditingClient({...editingClient, billingDay: e.target.value ? Number(e.target.value) : undefined})} />
+                <FormRow>
                   <p className="text-xs text-slate-400 leading-relaxed">Setting a fixed billing day (e.g., 25th) will consolidate all invoices for this client to be generated on this day of the month, overriding individual contract start dates.</p>
-                </div>
-              </div>
+                </FormRow>
+              </FormSection>
             </>
           )}
         </form>

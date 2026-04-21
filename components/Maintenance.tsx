@@ -7,22 +7,9 @@ import { MaintenanceLog, Currency, CURRENCIES } from '../types';
 import { formatCurrency } from '../utils/sanitizers';
 import { Wrench, CheckCircle, AlertTriangle, XCircle, Search, Plus, Calendar, Save, History, FileText, RefreshCw, Download } from 'lucide-react';
 import { AccessibleModal, ModalButton } from './ui/AccessibleModal';
+import { FormInput, FormSelect, FormNumber, FormDate, FormSection, FormRow } from './ui/Form';
 
-const MinimalInput = ({ label, value, onChange, type = "text", required = false }: any) => (
-  <div className="group relative">
-    <input type={type} required={required} value={value} onChange={onChange} placeholder=" " className="peer w-full px-0 py-2.5 border-b border-slate-200 bg-transparent text-slate-800 focus:border-slate-800 focus:ring-0 outline-none transition-all font-medium placeholder-transparent" />
-    <label className="absolute left-0 -top-2.5 text-xs text-slate-400 font-medium transition-all peer-placeholder-shown:text-sm peer-placeholder-shown:text-slate-400 peer-placeholder-shown:top-2.5 peer-focus:-top-2.5 peer-focus:text-xs peer-focus:text-slate-800 uppercase tracking-wide">{label}</label>
-  </div>
-);
 
-const MinimalSelect = ({ label, value, onChange, options }: any) => (
-  <div className="group relative">
-    <select value={value} onChange={onChange} className="peer w-full px-0 py-2.5 border-b border-slate-200 bg-transparent text-slate-800 focus:border-slate-800 focus:ring-0 outline-none transition-all font-medium appearance-none cursor-pointer" >
-      {options.map((opt: any) => (<option key={opt.value} value={opt.value}>{opt.label}</option>))}
-    </select>
-    <label className="absolute left-0 -top-2.5 text-xs text-slate-400 font-medium uppercase tracking-wide">{label}</label>
-  </div>
-);
 
 export const Maintenance: React.FC = () => {
     const toast = useToast();
@@ -212,23 +199,22 @@ export const Maintenance: React.FC = () => {
                 }
             >
                 <form id="log-maintenance-form" onSubmit={handleSaveLog} className="space-y-6">
-                    <MinimalSelect label="Select Billboard" value={newLog.billboardId} onChange={(e: any) => setNewLog({...newLog, billboardId: e.target.value})} options={[{value:'', label: 'Select Asset...'}, ...billboards.map(b => ({value: b.id, label: b.name}))]} />
-                    <div className="grid grid-cols-2 gap-6">
-                        <MinimalInput label="Date Checked" type="date" value={newLog.date} onChange={(e: any) => setNewLog({...newLog, date: e.target.value})} />
-                        <MinimalSelect label="Check Type" value={newLog.type} onChange={(e: any) => setNewLog({...newLog, type: e.target.value})} options={[{value:'Visual Check', label:'Visual Check'}, {value:'Structural', label:'Structural Safety'}, {value:'Electrical', label:'Electrical / Light'}, {value:'Cleaning', label:'Cleaning'}, {value:'Repair', label:'Repair'}]} />
-                    </div>
-                    <div className="grid grid-cols-2 gap-6">
-                        <MinimalInput label="Technician Name" value={newLog.technician} onChange={(e: any) => setNewLog({...newLog, technician: e.target.value})} required />
-                        <MinimalSelect label="Result Status" value={newLog.status} onChange={(e: any) => setNewLog({...newLog, status: e.target.value})} options={[{value:'Pass', label:'Pass (Good)'}, {value:'Needs Attention', label:'Needs Attention'}, {value:'Fail', label:'Fail (Critical)'}]} />
-                    </div>
-                    <MinimalInput label="Notes / Observations" value={newLog.notes} onChange={(e: any) => setNewLog({...newLog, notes: e.target.value})} />
-                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
-                        <p className="text-xs text-slate-400 font-bold uppercase mb-2">Optional Cost Tracking</p>
-                        <div className="grid grid-cols-2 gap-6">
-                            <MinimalInput label={`Cost Incurred (${newLog.currency || getDefaultCurrency()})`} type="number" value={newLog.cost} onChange={(e: any) => setNewLog({...newLog, cost: Number(e.target.value)})} />
-                            <MinimalSelect label="Currency" value={newLog.currency || getDefaultCurrency()} onChange={(e: any) => setNewLog({...newLog, currency: e.target.value as Currency})} options={CURRENCIES.map(c => ({ value: c, label: c }))} />
-                        </div>
-                    </div>
+                    <FormSection title="Asset & Inspection">
+                        <FormSelect label="Select Billboard" value={newLog.billboardId} onChange={(e: any) => setNewLog({...newLog, billboardId: e.target.value})} options={[{value:'', label: 'Select Asset...'}, ...billboards.map(b => ({value: b.id, label: b.name}))]} />
+                        <FormDate label="Date Checked" value={newLog.date || ''} onChange={(e: any) => setNewLog({...newLog, date: e.target.value})} />
+                        <FormSelect label="Check Type" value={newLog.type} onChange={(e: any) => setNewLog({...newLog, type: e.target.value})} options={[{value:'Visual Check', label:'Visual Check'}, {value:'Structural', label:'Structural Safety'}, {value:'Electrical', label:'Electrical / Light'}, {value:'Cleaning', label:'Cleaning'}, {value:'Repair', label:'Repair'}]} />
+                        <FormInput label="Technician Name" value={newLog.technician || ''} onChange={(e: any) => setNewLog({...newLog, technician: e.target.value})} required />
+                        <FormSelect label="Result Status" value={newLog.status} onChange={(e: any) => setNewLog({...newLog, status: e.target.value})} options={[{value:'Pass', label:'Pass (Good)'}, {value:'Needs Attention', label:'Needs Attention'}, {value:'Fail', label:'Fail (Critical)'}]} />
+                    </FormSection>
+                    <FormSection title="Notes">
+                        <FormRow>
+                            <FormInput label="Notes / Observations" value={newLog.notes || ''} onChange={(e: any) => setNewLog({...newLog, notes: e.target.value})} />
+                        </FormRow>
+                    </FormSection>
+                    <FormSection title="Optional Cost Tracking">
+                        <FormNumber label={`Cost Incurred (${newLog.currency || getDefaultCurrency()})`} min={0} value={newLog.cost || 0} onChange={(e: any) => setNewLog({...newLog, cost: Number(e.target.value)})} />
+                        <FormSelect label="Currency" value={newLog.currency || getDefaultCurrency()} onChange={(e: any) => setNewLog({...newLog, currency: e.target.value as Currency})} options={CURRENCIES.map(c => ({ value: c, label: c }))} />
+                    </FormSection>
                 </form>
             </AccessibleModal>
         </div>

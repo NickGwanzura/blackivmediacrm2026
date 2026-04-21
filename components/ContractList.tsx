@@ -4,11 +4,12 @@ import { mockContracts, mockClients, mockBillboards, getContracts, updateContrac
 import { useToast } from './Toast';
 import { generateContractPDF, generateContractsReportPDF } from '../services/pdfGenerator';
 import { emailContract } from '../services/emailService';
-import { Contract } from '../types';
+import { Contract, Currency, CURRENCIES, VAT_RATE } from '../types';
 import { formatCurrency } from '../utils/sanitizers';
 import { computeContractValue } from '../utils/contractMath';
 import { FileText, Calendar, Download, Eye, Clock, Plus as PlusIcon, FileDown, Mail, Loader2, PencilLine, Save, Archive, AlertTriangle, RotateCcw } from 'lucide-react';
 import { AccessibleModal, ModalButton } from './ui/AccessibleModal';
+import { FormInput, FormNumber, FormDate, FormSelect, FormSection, FormCheckbox } from './ui/Form';
 
 type StatusFilter = 'All' | 'Active' | 'Pending' | 'Expired' | 'Archived';
 
@@ -19,12 +20,7 @@ const STATUS_STYLES: Record<Contract['status'], string> = {
   Archived: 'bg-slate-100 text-slate-600 border-slate-200',
 };
 
-const MinimalInput = ({ label, value, onChange, type = 'text', required = false, min, max, step }: any) => (
-  <div className="group relative">
-    <input type={type} required={required} value={value ?? ''} onChange={onChange} min={min} max={max} step={step} placeholder=" " className="peer w-full px-0 py-2.5 border-b border-slate-200 bg-transparent text-slate-800 focus:border-slate-800 focus:ring-0 outline-none transition-all font-medium placeholder-transparent" />
-    <label className="absolute left-0 -top-2.5 text-xs text-slate-400 font-medium transition-all peer-placeholder-shown:text-sm peer-placeholder-shown:text-slate-400 peer-placeholder-shown:top-2.5 peer-focus:-top-2.5 peer-focus:text-xs peer-focus:text-slate-800 uppercase tracking-wide">{label}</label>
-  </div>
-);
+
 
 export const ContractList: React.FC = () => {
   const toast = useToast();
@@ -310,48 +306,46 @@ export const ContractList: React.FC = () => {
           </>
         }
       >
-        <form id="edit-contract-form" onSubmit={handleSaveEdit} className="space-y-8">
+        <form id="edit-contract-form" onSubmit={handleSaveEdit} className="space-y-6">
           {editingContract && (
             <>
-              <div className="grid grid-cols-2 gap-6">
-                <MinimalInput label="Start Date" type="date" value={editingContract.startDate} onChange={(e: any) => setEditingContract({ ...editingContract, startDate: e.target.value })} required />
-                <MinimalInput label="End Date" type="date" value={editingContract.endDate} onChange={(e: any) => setEditingContract({ ...editingContract, endDate: e.target.value })} required />
-              </div>
-              <div className="grid grid-cols-2 gap-6">
-                <MinimalInput label="Monthly Rate" type="number" min={0} step={1} value={editingContract.monthlyRate} onChange={(e: any) => setEditingContract({ ...editingContract, monthlyRate: Number(e.target.value) })} required />
-                <MinimalInput label="Installation Cost" type="number" min={0} step={1} value={editingContract.installationCost} onChange={(e: any) => setEditingContract({ ...editingContract, installationCost: Number(e.target.value) })} />
-              </div>
-              <div className="grid grid-cols-2 gap-6">
-                <MinimalInput label="Printing Cost" type="number" min={0} step={1} value={editingContract.printingCost} onChange={(e: any) => setEditingContract({ ...editingContract, printingCost: Number(e.target.value) })} />
-                <MinimalInput label="Details" value={editingContract.details} onChange={(e: any) => setEditingContract({ ...editingContract, details: e.target.value })} />
-              </div>
-              <div className="grid grid-cols-2 gap-6 items-end">
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wide text-slate-400 mb-2">Status</label>
-                  <select
-                    value={editingContract.status}
-                    onChange={(e) => setEditingContract({ ...editingContract, status: e.target.value as Contract['status'] })}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white text-slate-800 focus:border-slate-800 focus:ring-0 outline-none font-medium"
-                  >
-                    <option value="Active">Active</option>
-                    <option value="Pending">Pending</option>
-                    <option value="Expired">Expired</option>
-                    <option value="Archived">Archived</option>
-                  </select>
-                </div>
-                <label className="flex items-center gap-3 pb-2 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={editingContract.hasVat}
-                    onChange={(e) => setEditingContract({ ...editingContract, hasVat: e.target.checked })}
-                    className="w-4 h-4 accent-slate-900"
-                  />
-                  <span className="text-sm font-medium text-slate-700">Apply VAT ({Math.round(VAT_RATE * 100)}%)</span>
-                </label>
-              </div>
+              <FormSection title="Contract Duration">
+                <FormDate label="Start Date" value={editingContract.startDate} onChange={(e: any) => setEditingContract({ ...editingContract, startDate: e.target.value })} required />
+                <FormDate label="End Date" value={editingContract.endDate} onChange={(e: any) => setEditingContract({ ...editingContract, endDate: e.target.value })} required />
+              </FormSection>
+              <FormSection title="Financial Terms">
+                <FormNumber label="Monthly Rate" min={0} step={1} value={editingContract.monthlyRate} onChange={(e: any) => setEditingContract({ ...editingContract, monthlyRate: Number(e.target.value) })} required />
+                <FormNumber label="Installation Cost" min={0} step={1} value={editingContract.installationCost} onChange={(e: any) => setEditingContract({ ...editingContract, installationCost: Number(e.target.value) })} />
+                <FormNumber label="Printing Cost" min={0} step={1} value={editingContract.printingCost} onChange={(e: any) => setEditingContract({ ...editingContract, printingCost: Number(e.target.value) })} />
+                <FormInput label="Details" value={editingContract.details} onChange={(e: any) => setEditingContract({ ...editingContract, details: e.target.value })} />
+              </FormSection>
+              <FormSection title="Status & Tax">
+                <FormSelect
+                  label="Currency"
+                  value={editingContract.currency || 'USD'}
+                  onChange={(e: any) => setEditingContract({ ...editingContract, currency: e.target.value as Currency })}
+                  options={CURRENCIES.map(c => ({ value: c, label: c }))}
+                />
+                <FormSelect
+                  label="Status"
+                  value={editingContract.status}
+                  onChange={(e: any) => setEditingContract({ ...editingContract, status: e.target.value as Contract['status'] })}
+                  options={[
+                    { value: 'Active', label: 'Active' },
+                    { value: 'Pending', label: 'Pending' },
+                    { value: 'Expired', label: 'Expired' },
+                    { value: 'Archived', label: 'Archived' },
+                  ]}
+                />
+                <FormCheckbox
+                  label={`Apply VAT (${Math.round(VAT_RATE * 100)}%)`}
+                  checked={editingContract.hasVat}
+                  onChange={(checked) => setEditingContract({ ...editingContract, hasVat: checked })}
+                />
+              </FormSection>
               <div className="bg-slate-50 rounded-xl border border-slate-100 p-4 flex justify-between items-center">
                 <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Recomputed Total Value</span>
-                <span className="text-lg font-bold text-slate-900">{formatCurrency(recomputeTotal(editingContract), editingContract.currency)}</span>
+                <span className="text-lg font-bold text-slate-900">{formatCurrency(computeContractValue(editingContract), editingContract.currency)}</span>
               </div>
             </>
           )}

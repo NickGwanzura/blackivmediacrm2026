@@ -1,27 +1,15 @@
 
 import React, { useState } from 'react';
-import { getExpenses, addExpense, mockPrintingJobs, getClients, getDefaultCurrency } from '../services/mockData';
+import { getExpenses, addExpense, mockPrintingJobs, getClients, getDefaultCurrency, wipeExpenses } from '../services/mockData';
 import { useToast } from './Toast';
-import { Printer, Plus, Scissors, Droplets, Zap, User, Download, Receipt } from 'lucide-react';
+import { Printer, Plus, Scissors, Droplets, Zap, User, Download, Receipt, Trash2 } from 'lucide-react';
 import { AccessibleModal, ModalButton } from './ui/AccessibleModal';
+import { FormInput, FormSelect, FormNumber, FormDate, FormSection, FormRow } from './ui/Form';
 import { PrintingJob, Expense, Currency, CURRENCIES } from '../types';
 import { generateCostReportPDF } from '../services/pdfGenerator';
 import { formatCurrency, formatCurrencyTotals, sumByCurrency } from '../utils/sanitizers';
 
-const MinimalInput = ({ label, value, onChange, type = "text", placeholder }: any) => (
-  <div className="group relative">
-    <input type={type} value={value} onChange={onChange} className="peer w-full px-0 py-2.5 border-b border-slate-200 bg-transparent text-slate-800 focus:border-slate-800 focus:ring-0 outline-none transition-all font-medium placeholder-transparent" placeholder=" " />
-    <label className="absolute left-0 -top-2.5 text-xs text-slate-400 font-medium transition-all peer-placeholder-shown:text-sm peer-placeholder-shown:text-slate-400 peer-placeholder-shown:top-2.5 peer-focus:-top-2.5 peer-focus:text-xs peer-focus:text-slate-800 uppercase tracking-wide">{label}</label>
-  </div>
-);
-const MinimalSelect = ({ label, value, onChange, options }: any) => (
-  <div className="group relative">
-    <select value={value} onChange={onChange} className="peer w-full px-0 py-2.5 border-b border-slate-200 bg-transparent text-slate-800 focus:border-slate-800 focus:ring-0 outline-none transition-all font-medium appearance-none cursor-pointer" >
-      {options.map((opt: any) => (<option key={opt.value} value={opt.value}>{opt.label}</option>))}
-    </select>
-    <label className="absolute left-0 -top-2.5 text-xs text-slate-400 font-medium uppercase tracking-wide">{label}</label>
-  </div>
-);
+
 
 export const Expenses: React.FC = () => {
   const toast = useToast();
@@ -39,6 +27,25 @@ export const Expenses: React.FC = () => {
   const calculateTotalJobCost = () => { return (newJob.pvcCost || 0) + (newJob.inkCost || 0) + (newJob.electricityCost || 0) + (newJob.operatorCost || 0) + (newJob.weldingCost || 0); };
   const exportPdfReport = () => { generateCostReportPDF(getClients(), mockPrintingJobs, generalExpenses); };
 
+  // Wipe every expense row (local + remote). Confirmation first because
+  // this is destructive and cannot be undone from the UI.
+  const handleWipeExpenses = async () => {
+    const ok = await toast.confirm({
+      title: 'Wipe All Expenses?',
+      message: `This permanently deletes all ${generalExpenses.length} expense record${generalExpenses.length === 1 ? '' : 's'} from this app and the server. This cannot be undone.`,
+      variant: 'danger',
+      confirmLabel: 'Wipe Expenses',
+    });
+    if (!ok) return;
+    const removed = await wipeExpenses();
+    setGeneralExpenses(getExpenses());
+    toast.success(`Wiped ${removed} expense record${removed === 1 ? '' : 's'}.`);
+  };
+
+  // Split the General-tab expense total by currency so USD and ZWG are
+  // visible side-by-side instead of collapsed into a misleading scalar.
+  const generalTotalsByCurrency = sumByCurrency(generalExpenses, e => e.amount, e => e.currency);
+
   // Calculate dynamic totals from actual data — grouped by currency so a
   // mixed USD/ZWG printing pipeline doesn't collapse into a single
   // misleading scalar.
@@ -53,7 +60,12 @@ export const Expenses: React.FC = () => {
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div><h2 className="text-4xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-slate-900 to-slate-600 mb-2">Expenses & Production</h2><p className="text-slate-500 font-medium">Internal cost tracking, printing jobs, and profitability analysis</p></div>
           {activeTab === 'Printing' && (<button onClick={() => setIsAddJobModalOpen(true)} className="bg-slate-900 text-white px-5 py-2.5 rounded-full text-sm font-bold uppercase tracking-wider shadow-lg hover:shadow-xl hover:scale-105 transition-all flex items-center gap-2"><Plus size={16} /> New Print Job</button>)}
-          {activeTab === 'General' && (<button onClick={() => setIsAddExpenseModalOpen(true)} className="bg-slate-900 text-white px-5 py-2.5 rounded-full text-sm font-bold uppercase tracking-wider shadow-lg hover:shadow-xl hover:scale-105 transition-all flex items-center gap-2"><Plus size={16} /> New Expense</button>)}
+          {activeTab === 'General' && (
+            <div className="flex gap-2">
+              <button onClick={handleWipeExpenses} disabled={generalExpenses.length === 0} className="bg-white border border-rose-100 text-rose-600 px-4 py-2.5 rounded-full text-sm font-bold uppercase tracking-wider hover:bg-rose-50 transition-all flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed" title="Delete every expense record (local + server)"><Trash2 size={16} /> Wipe All</button>
+              <button onClick={() => setIsAddExpenseModalOpen(true)} className="bg-slate-900 text-white px-5 py-2.5 rounded-full text-sm font-bold uppercase tracking-wider shadow-lg hover:shadow-xl hover:scale-105 transition-all flex items-center gap-2"><Plus size={16} /> New Expense</button>
+            </div>
+          )}
           {activeTab === 'Reports' && (
               <div className="flex gap-2">
                   <button onClick={exportPdfReport} className="bg-white border border-slate-200 text-slate-700 px-5 py-2.5 rounded-full text-sm font-bold uppercase tracking-wider hover:bg-slate-50 transition-all flex items-center gap-2"><Download size={16} /> PDF Report</button>
@@ -81,25 +93,26 @@ export const Expenses: React.FC = () => {
           </>
         }
       >
-        <form id="add-job-form" onSubmit={handleAddJob} className="space-y-8">
-          <div className="grid grid-cols-2 gap-6">
-            <div className="col-span-2"><label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">Client</label><select className="w-full px-0 py-2 border-b border-slate-200 bg-transparent text-slate-800 font-medium focus:border-slate-800 outline-none" value={newJob.clientId} onChange={(e) => setNewJob({...newJob, clientId: e.target.value})}><option value="">Select Client</option>{getClients().map(c => <option key={c.id} value={c.id}>{c.companyName}</option>)}</select></div>
-            <div className="col-span-2"><MinimalInput label="Description / Ref" value={newJob.description} onChange={(e: any) => setNewJob({...newJob, description: e.target.value})} /></div>
-            <MinimalInput label="Dimensions (e.g. 12x4m)" value={newJob.dimensions} onChange={(e: any) => setNewJob({...newJob, dimensions: e.target.value})} />
-            <MinimalSelect label="Currency" value={newJob.currency || 'USD'} onChange={(e: any) => setNewJob({...newJob, currency: e.target.value as Currency})} options={CURRENCIES.map(c => ({ value: c, label: c }))} />
-            <MinimalInput label={`Billed Amount (${newJob.currency || 'USD'})`} type="number" value={newJob.chargedAmount} onChange={(e: any) => setNewJob({...newJob, chargedAmount: Number(e.target.value)})} />
-          </div>
-          <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 space-y-4">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Internal Cost Breakdown — {newJob.currency || 'USD'}</h4>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-              <MinimalInput label="PVC Cost" type="number" value={newJob.pvcCost} onChange={(e: any) => setNewJob({...newJob, pvcCost: Number(e.target.value)})} />
-              <MinimalInput label="Ink" type="number" value={newJob.inkCost} onChange={(e: any) => setNewJob({...newJob, inkCost: Number(e.target.value)})} />
-              <MinimalInput label="Electricity" type="number" value={newJob.electricityCost} onChange={(e: any) => setNewJob({...newJob, electricityCost: Number(e.target.value)})} />
-              <MinimalInput label="Operator" type="number" value={newJob.operatorCost} onChange={(e: any) => setNewJob({...newJob, operatorCost: Number(e.target.value)})} />
-              <MinimalInput label="Welding" type="number" value={newJob.weldingCost} onChange={(e: any) => setNewJob({...newJob, weldingCost: Number(e.target.value)})} />
-              <div className="flex flex-col justify-end"><p className="text-xs text-slate-400">Total Cost</p><p className="text-lg font-bold text-slate-800">{formatCurrency(calculateTotalJobCost(), newJob.currency)}</p></div>
-            </div>
-          </div>
+        <form id="add-job-form" onSubmit={handleAddJob} className="space-y-6">
+          <FormSection title="Job Details">
+            <FormRow>
+              <FormSelect label="Client" value={newJob.clientId || ''} onChange={(e: any) => setNewJob({...newJob, clientId: e.target.value})} options={[{value: '', label: 'Select Client'}, ...getClients().map(c => ({value: c.id, label: c.companyName}))]} />
+            </FormRow>
+            <FormRow>
+              <FormInput label="Description / Ref" value={newJob.description || ''} onChange={(e: any) => setNewJob({...newJob, description: e.target.value})} />
+            </FormRow>
+            <FormInput label="Dimensions (e.g. 12x4m)" value={newJob.dimensions || ''} onChange={(e: any) => setNewJob({...newJob, dimensions: e.target.value})} />
+            <FormSelect label="Currency" value={newJob.currency || 'USD'} onChange={(e: any) => setNewJob({...newJob, currency: e.target.value as Currency})} options={CURRENCIES.map(c => ({ value: c, label: c }))} />
+            <FormNumber label={`Billed Amount (${newJob.currency || 'USD'})`} min={0} value={newJob.chargedAmount || 0} onChange={(e: any) => setNewJob({...newJob, chargedAmount: Number(e.target.value)})} />
+          </FormSection>
+          <FormSection title={`Internal Cost Breakdown — ${newJob.currency || 'USD'}`}>
+            <FormNumber label="PVC Cost" min={0} value={newJob.pvcCost || 0} onChange={(e: any) => setNewJob({...newJob, pvcCost: Number(e.target.value)})} />
+            <FormNumber label="Ink" min={0} value={newJob.inkCost || 0} onChange={(e: any) => setNewJob({...newJob, inkCost: Number(e.target.value)})} />
+            <FormNumber label="Electricity" min={0} value={newJob.electricityCost || 0} onChange={(e: any) => setNewJob({...newJob, electricityCost: Number(e.target.value)})} />
+            <FormNumber label="Operator" min={0} value={newJob.operatorCost || 0} onChange={(e: any) => setNewJob({...newJob, operatorCost: Number(e.target.value)})} />
+            <FormNumber label="Welding" min={0} value={newJob.weldingCost || 0} onChange={(e: any) => setNewJob({...newJob, weldingCost: Number(e.target.value)})} />
+            <div className="flex flex-col justify-end"><p className="text-xs text-slate-400">Total Cost</p><p className="text-lg font-bold text-slate-800">{formatCurrency(calculateTotalJobCost(), newJob.currency)}</p></div>
+          </FormSection>
         </form>
       </AccessibleModal>
       <AccessibleModal
@@ -118,14 +131,14 @@ export const Expenses: React.FC = () => {
         }
       >
         <form id="add-expense-form" onSubmit={handleAddExpense} className="space-y-6">
-          <MinimalSelect label="Category" value={newExpense.category} onChange={(e: any) => setNewExpense({...newExpense, category: e.target.value})} options={[{value: 'Maintenance', label: 'Maintenance & Repairs'},{value: 'Electricity', label: 'Electricity / Power'},{value: 'Labor', label: 'General Labor'},{value: 'Printing', label: 'Printing Supplies (Misc)'},{value: 'Other', label: 'Other'}]} />
-          <MinimalInput label="Description" value={newExpense.description} onChange={(e: any) => setNewExpense({...newExpense, description: e.target.value})} required />
-          <div className="grid grid-cols-3 gap-6">
-            <MinimalInput label={`Amount (${newExpense.currency || 'USD'})`} type="number" value={newExpense.amount} onChange={(e: any) => setNewExpense({...newExpense, amount: Number(e.target.value)})} required />
-            <MinimalSelect label="Currency" value={newExpense.currency || 'USD'} onChange={(e: any) => setNewExpense({...newExpense, currency: e.target.value as Currency})} options={CURRENCIES.map(c => ({ value: c, label: c }))} />
-            <MinimalInput label="Date" type="date" value={newExpense.date} onChange={(e: any) => setNewExpense({...newExpense, date: e.target.value})} />
-          </div>
-          <MinimalInput label="Reference / Invoice No." value={newExpense.reference} onChange={(e: any) => setNewExpense({...newExpense, reference: e.target.value})} />
+          <FormSection title="Expense Details">
+            <FormSelect label="Category" value={newExpense.category || 'Maintenance'} onChange={(e: any) => setNewExpense({...newExpense, category: e.target.value})} options={[{value: 'Maintenance', label: 'Maintenance & Repairs'},{value: 'Electricity', label: 'Electricity / Power'},{value: 'Labor', label: 'General Labor'},{value: 'Printing', label: 'Printing Supplies (Misc)'},{value: 'Other', label: 'Other'}]} />
+            <FormInput label="Description" value={newExpense.description || ''} onChange={(e: any) => setNewExpense({...newExpense, description: e.target.value})} required />
+            <FormNumber label={`Amount (${newExpense.currency || 'USD'})`} min={0} value={newExpense.amount || 0} onChange={(e: any) => setNewExpense({...newExpense, amount: Number(e.target.value)})} required />
+            <FormSelect label="Currency" value={newExpense.currency || 'USD'} onChange={(e: any) => setNewExpense({...newExpense, currency: e.target.value as Currency})} options={CURRENCIES.map(c => ({ value: c, label: c }))} />
+            <FormDate label="Date" value={newExpense.date || ''} onChange={(e: any) => setNewExpense({...newExpense, date: e.target.value})} />
+            <FormInput label="Reference / Invoice No." value={newExpense.reference || ''} onChange={(e: any) => setNewExpense({...newExpense, reference: e.target.value})} />
+          </FormSection>
         </form>
       </AccessibleModal>
     </>

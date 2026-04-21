@@ -6,31 +6,9 @@ import { OutsourcedBillboard, Billboard, Currency, CURRENCIES } from '../types';
 import { formatCurrency, sumByCurrency, formatCurrencyTotals } from '../utils/sanitizers';
 import { Plus, Edit2, Globe, DollarSign, Calendar, Save, Trash2, MapPin } from 'lucide-react';
 import { AccessibleModal, ModalButton } from './ui/AccessibleModal';
+import { FormInput, FormSelect, FormNumber, FormDate, FormSection } from './ui/Form';
 
-const MinimalSelect = ({ label, value, onChange, options, disabled = false }: any) => (
-  <div className="group relative pt-4 w-full">
-    <select 
-      value={value}
-      onChange={onChange}
-      disabled={disabled}
-      className="peer w-full px-0 py-2.5 border-b border-slate-200 bg-transparent text-slate-800 focus:border-slate-800 focus:ring-0 outline-none transition-all font-medium appearance-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed" 
-    >
-      {options.map((opt: any) => (
-        <option key={opt.value} value={opt.value}>{opt.label}</option>
-      ))}
-    </select>
-    <label className="absolute left-0 -top-0 text-xs text-slate-400 font-medium uppercase tracking-wide pointer-events-none">
-      {label}
-    </label>
-  </div>
-);
 
-const MinimalInput = ({ label, value, onChange, type = "text", required = false }: any) => (
-  <div className="group relative pt-4 w-full">
-    <input type={type} required={required} value={value} onChange={onChange} placeholder=" " className="peer w-full px-0 py-2.5 border-b border-slate-200 bg-transparent text-slate-800 focus:border-slate-800 focus:ring-0 outline-none transition-all font-medium placeholder-transparent" />
-    <label className="absolute left-0 -top-0 text-xs text-slate-400 font-medium transition-all peer-placeholder-shown:text-sm peer-placeholder-shown:text-slate-400 peer-placeholder-shown:top-2.5 peer-focus:-top-0 peer-focus:text-xs peer-focus:text-slate-800 uppercase tracking-wide pointer-events-none">{label}</label>
-  </div>
-);
 
 export const OutsourcedList: React.FC = () => {
   const toast = useToast();
@@ -154,37 +132,33 @@ export const OutsourcedList: React.FC = () => {
         }
       >
         <form id="outsourced-form" onSubmit={handleSave} className="space-y-6">
-          <MinimalSelect
-            label="Select Billboard from Inventory"
-            value={currentBillboard.billboardId || ''}
-            onChange={(e: any) => setCurrentBillboard({...currentBillboard, billboardId: e.target.value})}
-            options={[
-              {value: '', label: 'Select Asset...'},
-              ...inventory.map(b => ({value: b.id, label: `${b.name} (${b.type})`}))
-            ]}
-          />
-
-          {currentBillboard.billboardId && (
-            <div className="flex items-center gap-2 text-xs text-indigo-600 bg-indigo-50 p-2 rounded-lg">
-              <MapPin size={12} />
-              {inventory.find(b => b.id === currentBillboard.billboardId)?.location}
-            </div>
-          )}
-
-          <div className="grid grid-cols-2 gap-6">
-            <MinimalInput label="Partner Name" value={currentBillboard.mediaOwner || ''} onChange={(e: any) => setCurrentBillboard({...currentBillboard, mediaOwner: e.target.value})} required />
-            <MinimalInput label="Partner Contact" value={currentBillboard.ownerContact || ''} onChange={(e: any) => setCurrentBillboard({...currentBillboard, ownerContact: e.target.value})} />
-          </div>
-          <div className="grid grid-cols-2 gap-6">
-            <div className="space-y-4">
-              <MinimalInput label={`Monthly Payout (${currentBillboard.currency || getDefaultCurrency()})`} type="number" value={currentBillboard.monthlyPayout} onChange={(e: any) => setCurrentBillboard({...currentBillboard, monthlyPayout: Number(e.target.value)})} />
-              <MinimalSelect label="Currency" value={currentBillboard.currency || getDefaultCurrency()} onChange={(e: any) => setCurrentBillboard({...currentBillboard, currency: e.target.value as Currency})} options={CURRENCIES.map(c => ({ value: c, label: c }))} />
-            </div>
-            <div className="space-y-4">
-              <MinimalInput label="Start Date" type="date" value={currentBillboard.contractStart || ''} onChange={(e: any) => setCurrentBillboard({...currentBillboard, contractStart: e.target.value})} />
-              <MinimalInput label="End Date" type="date" value={currentBillboard.contractEnd || ''} onChange={(e: any) => setCurrentBillboard({...currentBillboard, contractEnd: e.target.value})} />
-            </div>
-          </div>
+          <FormSection title="Asset Selection">
+            <FormSelect
+              label="Select Billboard from Inventory"
+              value={currentBillboard.billboardId || ''}
+              onChange={(e: any) => setCurrentBillboard({...currentBillboard, billboardId: e.target.value})}
+              options={[
+                {value: '', label: 'Select Asset...'},
+                ...inventory.map(b => ({value: b.id, label: `${b.name} (${b.type})`}))
+              ]}
+            />
+            {currentBillboard.billboardId && (
+              <div className="flex items-center gap-2 text-xs text-indigo-600 bg-indigo-50 p-2 rounded-lg">
+                <MapPin size={12} />
+                {inventory.find(b => b.id === currentBillboard.billboardId)?.location}
+              </div>
+            )}
+          </FormSection>
+          <FormSection title="Partner Details">
+            <FormInput label="Partner Name" value={currentBillboard.mediaOwner || ''} onChange={(e: any) => setCurrentBillboard({...currentBillboard, mediaOwner: e.target.value})} required />
+            <FormInput label="Partner Contact" value={currentBillboard.ownerContact || ''} onChange={(e: any) => setCurrentBillboard({...currentBillboard, ownerContact: e.target.value})} />
+          </FormSection>
+          <FormSection title="Contract Terms">
+            <FormNumber label={`Monthly Payout (${currentBillboard.currency || getDefaultCurrency()})`} min={0} value={currentBillboard.monthlyPayout || 0} onChange={(e: any) => setCurrentBillboard({...currentBillboard, monthlyPayout: Number(e.target.value)})} />
+            <FormSelect label="Currency" value={currentBillboard.currency || getDefaultCurrency()} onChange={(e: any) => setCurrentBillboard({...currentBillboard, currency: e.target.value as Currency})} options={CURRENCIES.map(c => ({ value: c, label: c }))} />
+            <FormDate label="Start Date" value={currentBillboard.contractStart || ''} onChange={(e: any) => setCurrentBillboard({...currentBillboard, contractStart: e.target.value})} />
+            <FormDate label="End Date" value={currentBillboard.contractEnd || ''} onChange={(e: any) => setCurrentBillboard({...currentBillboard, contractEnd: e.target.value})} />
+          </FormSection>
         </form>
       </AccessibleModal>
       <AccessibleModal

@@ -8,6 +8,7 @@ import { generateRentalProposal } from '../services/aiService';
 import { Contract, BillboardType, VAT_RATE, Invoice, Currency, CURRENCIES } from '../types';
 import { FileText, Calendar, Download, Eye, Plus, Wand2, RefreshCw, CheckCircle, Trash2, Sparkles, Layers, ShoppingCart, MinusCircle, FileDown, Mail, Loader2, Receipt, PencilLine, AlertTriangle, Archive, Save } from 'lucide-react';
 import { AccessibleModal, ModalButton } from './ui/AccessibleModal';
+import { FormInput, FormSelect, FormNumber, FormDate, FormSection, FormCheckbox } from './ui/Form';
 import { formatCurrency } from '../utils/sanitizers';
 import { computeContractValue, monthsBetween } from '../utils/contractMath';
 
@@ -18,45 +19,7 @@ const STATUS_STYLES: Record<Contract['status'], string> = {
   Archived: 'bg-slate-100 text-slate-600 border-slate-200',
 };
 
-const MinimalInput = ({ label, value, onChange, type = "text", required = false, disabled = false }: any) => {
-  const isDate = type === 'date';
-  return (
-    <div className="group relative pt-4 w-full">
-        <input 
-        type={type} 
-        required={required}
-        value={value}
-        onChange={onChange}
-        disabled={disabled}
-        placeholder=" "
-        className="peer w-full px-0 py-2.5 border-b border-slate-200 bg-transparent text-slate-800 focus:border-slate-800 focus:ring-0 outline-none transition-all font-medium placeholder-transparent disabled:opacity-50 disabled:cursor-not-allowed" 
-        />
-        <label className={`absolute left-0 -top-0 text-xs text-slate-400 font-medium transition-all uppercase tracking-wide 
-            ${isDate ? '' : 'peer-placeholder-shown:text-sm peer-placeholder-shown:text-slate-400 peer-placeholder-shown:top-6'} 
-            peer-focus:-top-0 peer-focus:text-xs peer-focus:text-slate-800 pointer-events-none`}>
-        {label}
-        </label>
-    </div>
-  );
-};
 
-const MinimalSelect = ({ label, value, onChange, options, disabled = false }: any) => (
-  <div className="group relative pt-4 w-full">
-    <select 
-      value={value}
-      onChange={onChange}
-      disabled={disabled}
-      className="peer w-full px-0 py-2.5 border-b border-slate-200 bg-transparent text-slate-800 focus:border-slate-800 focus:ring-0 outline-none transition-all font-medium appearance-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed" 
-    >
-      {options.map((opt: any) => (
-        <option key={opt.value} value={opt.value}>{opt.label}</option>
-      ))}
-    </select>
-    <label className="absolute left-0 -top-0 text-xs text-slate-400 font-medium uppercase tracking-wide pointer-events-none">
-      {label}
-    </label>
-  </div>
-);
 
 // Define type for batch items
 interface BatchItem {
@@ -226,12 +189,14 @@ export const Rentals: React.FC = () => {
           return;
       }
 
-      // A consolidated invoice can only carry one currency — reject a
-      // billboard whose denomination differs from items already in the cart.
-      // Users needing mixed-currency rentals run one batch per currency.
-      const billboardCurrency = (selectedBillboard.currency || getDefaultCurrency()) as Currency;
-      if (batchItems.length > 0 && batchItems[0].currency !== billboardCurrency) {
-          toast.warning(`Batch is ${batchItems[0].currency}; this billboard bills in ${billboardCurrency}. Create a separate batch for the other currency.`);
+      // A consolidated invoice can only carry one currency — reject an
+      // item whose denomination differs from items already in the cart.
+      // Currency comes from the user's in-form choice (pre-filled from the
+      // billboard) so an override in the selector is honoured. Users needing
+      // mixed-currency rentals run one batch per currency.
+      const itemCurrency = (formData.currency || selectedBillboard.currency || getDefaultCurrency()) as Currency;
+      if (batchItems.length > 0 && batchItems[0].currency !== itemCurrency) {
+          toast.warning(`Batch is ${batchItems[0].currency}; this item is in ${itemCurrency}. Create a separate batch for the other currency.`);
           return;
       }
 
@@ -246,7 +211,7 @@ export const Rentals: React.FC = () => {
           monthlyRate: formData.monthlyRate,
           installationCost: formData.installationCost,
           printingCost: formData.printingCost,
-          currency: billboardCurrency,
+          currency: itemCurrency,
           details: detailText,
           tempId: Date.now()
       };
@@ -385,7 +350,10 @@ export const Rentals: React.FC = () => {
         ? (formData.side === 'Both' ? "Sides A & B" : `Side ${formData.side}`) 
         : `Slot ${formData.slotNumber}`;
 
-    const contractCurrency = (selectedBillboard?.currency || formData.currency || getDefaultCurrency()) as Currency;
+    // Prefer the user's in-form choice so an override in the Currency
+    // selector actually wins; fall back to the billboard's currency, then
+    // the company default for orphaned cases.
+    const contractCurrency = (formData.currency || selectedBillboard?.currency || getDefaultCurrency()) as Currency;
     const rental: Contract = {
         id: rentalId,
         clientId: formData.clientId,
@@ -648,13 +616,10 @@ export const Rentals: React.FC = () => {
             {/* Form Side */}
             <div className={`space-y-6 sm:space-y-8 pr-0 lg:pr-8 lg:border-r border-slate-100 ${isBatchMode ? 'lg:col-span-2' : ''}`}>
                 <form id="rental-create-form" onSubmit={isBatchMode ? (e) => e.preventDefault() : handleSingleCreate}>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                        <MinimalSelect label="Select Client" value={formData.clientId} onChange={(e: any) => setFormData(prev => ({...prev, clientId: e.target.value}))} options={[{value: '', label: 'Select Client...'}, ...mockClients.map(c => ({value: c.id, label: c.companyName}))]} disabled={isBatchMode && batchItems.length > 0} />
-
-                        <div className="flex gap-4">
-                            <MinimalInput label="Start Date" type="date" value={formData.startDate} onChange={(e: any) => setFormData(prev => ({...prev, startDate: e.target.value}))} required disabled={isBatchMode && batchItems.length > 0} />
-                            <MinimalInput label="End Date" type="date" value={formData.endDate} onChange={(e: any) => setFormData(prev => ({...prev, endDate: e.target.value}))} required disabled={isBatchMode && batchItems.length > 0} />
-                        </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                        <FormSelect label="Select Client" value={formData.clientId} onChange={(e: any) => setFormData(prev => ({...prev, clientId: e.target.value}))} options={[{value: '', label: 'Select Client...'}, ...mockClients.map(c => ({value: c.id, label: c.companyName}))]} />
+                        <FormDate label="Start Date" value={formData.startDate} onChange={(e: any) => setFormData(prev => ({...prev, startDate: e.target.value}))} required />
+                        <FormDate label="End Date" value={formData.endDate} onChange={(e: any) => setFormData(prev => ({...prev, endDate: e.target.value}))} required />
                     </div>
 
                     <div className={`p-6 bg-slate-50 rounded-2xl border border-slate-100 space-y-6 ${isBatchMode ? 'mb-8' : ''}`}>
@@ -663,7 +628,7 @@ export const Rentals: React.FC = () => {
                             {isBatchMode && <span className="text-[10px] text-slate-400 font-medium">Step 2: Build Cart</span>}
                         </div>
 
-                        <MinimalSelect
+                        <FormSelect
                             label="Select Billboard"
                             value={formData.billboardId}
                             onChange={(e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -705,15 +670,21 @@ export const Rentals: React.FC = () => {
                                     </div>
                                 )}
                                 {selectedBillboard.type === BillboardType.LED && (
-                                    <MinimalSelect label="Select Slot" value={formData.slotNumber} onChange={(e: any) => setFormData(prev => ({...prev, slotNumber: Number(e.target.value)}))} options={Array.from({length: selectedBillboard.totalSlots || 10}, (_, i) => ({value: i+1, label: `Slot ${i+1}`}))} />
+                                    <FormSelect label="Select Slot" value={formData.slotNumber} onChange={(e: any) => setFormData(prev => ({...prev, slotNumber: Number(e.target.value)}))} options={Array.from({length: selectedBillboard.totalSlots || 10}, (_, i) => ({value: i+1, label: `Slot ${i+1}`}))} />
                                 )}
 
-                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-                                    <MinimalInput label={`Monthly Rate (${formData.currency || 'USD'})`} type="number" value={formData.monthlyRate} onChange={(e: any) => setFormData(prev => ({...prev, monthlyRate: Number(e.target.value)}))} />
-                                    <MinimalInput label={`Install Fee (${formData.currency || 'USD'})`} type="number" value={formData.installationCost} onChange={(e: any) => setFormData(prev => ({...prev, installationCost: Number(e.target.value)}))} />
-                                    <MinimalInput label={`Print Cost (${formData.currency || 'USD'})`} type="number" value={formData.printingCost} onChange={(e: any) => setFormData(prev => ({...prev, printingCost: Number(e.target.value)}))} />
+                                <FormSelect
+                                    label="Billing Currency"
+                                    value={formData.currency || 'USD'}
+                                    onChange={(e: any) => setFormData(prev => ({...prev, currency: e.target.value as Currency}))}
+                                    options={CURRENCIES.map(c => ({ value: c, label: c }))}
+                                    hint={`Pre-filled from billboard (${selectedBillboard.currency || 'USD'}). Override if the contract is billed in a different currency.`}
+                                />
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                    <FormNumber label={`Monthly Rate (${formData.currency || 'USD'})`} min={0} value={formData.monthlyRate} onChange={(e: any) => setFormData(prev => ({...prev, monthlyRate: Number(e.target.value)}))} />
+                                    <FormNumber label={`Install Fee (${formData.currency || 'USD'})`} min={0} value={formData.installationCost} onChange={(e: any) => setFormData(prev => ({...prev, installationCost: Number(e.target.value)}))} />
+                                    <FormNumber label={`Print Cost (${formData.currency || 'USD'})`} min={0} value={formData.printingCost} onChange={(e: any) => setFormData(prev => ({...prev, printingCost: Number(e.target.value)}))} />
                                 </div>
-                                <div className="mt-2 text-[10px] text-slate-400 font-medium uppercase tracking-wide">Billing currency inherited from billboard: <span className="font-bold text-slate-700">{formData.currency || 'USD'}</span></div>
                             </>
                         )}
 
@@ -836,34 +807,30 @@ export const Rentals: React.FC = () => {
       >
         {editingContract && (
           <form id="rental-edit-form" onSubmit={handleSaveEdit} className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <MinimalInput label="Start Date" type="date" value={editingContract.startDate} onChange={(e: any) => setEditingContract({ ...editingContract, startDate: e.target.value })} required />
-              <MinimalInput label="End Date" type="date" value={editingContract.endDate} onChange={(e: any) => setEditingContract({ ...editingContract, endDate: e.target.value })} required />
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <MinimalInput label={`Monthly Rate (${editingContract.currency || 'USD'})`} type="number" value={editingContract.monthlyRate} onChange={(e: any) => setEditingContract({ ...editingContract, monthlyRate: Number(e.target.value) })} required />
-              <MinimalInput label={`Install Fee (${editingContract.currency || 'USD'})`} type="number" value={editingContract.installationCost} onChange={(e: any) => setEditingContract({ ...editingContract, installationCost: Number(e.target.value) })} />
-              <MinimalInput label={`Print Cost (${editingContract.currency || 'USD'})`} type="number" value={editingContract.printingCost} onChange={(e: any) => setEditingContract({ ...editingContract, printingCost: Number(e.target.value) })} />
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <MinimalSelect label="Currency" value={editingContract.currency || 'USD'} onChange={(e: any) => setEditingContract({ ...editingContract, currency: e.target.value as Currency })} options={CURRENCIES.map(c => ({ value: c, label: c }))} />
-              <MinimalSelect label="Status" value={editingContract.status} onChange={(e: any) => setEditingContract({ ...editingContract, status: e.target.value as Contract['status'] })} options={[
+            <FormSection title="Contract Duration">
+              <FormDate label="Start Date" value={editingContract.startDate} onChange={(e: any) => setEditingContract({ ...editingContract, startDate: e.target.value })} required />
+              <FormDate label="End Date" value={editingContract.endDate} onChange={(e: any) => setEditingContract({ ...editingContract, endDate: e.target.value })} required />
+            </FormSection>
+            <FormSection title="Financial Terms">
+              <FormNumber label={`Monthly Rate (${editingContract.currency || 'USD'})`} min={0} value={editingContract.monthlyRate} onChange={(e: any) => setEditingContract({ ...editingContract, monthlyRate: Number(e.target.value) })} required />
+              <FormNumber label={`Install Fee (${editingContract.currency || 'USD'})`} min={0} value={editingContract.installationCost} onChange={(e: any) => setEditingContract({ ...editingContract, installationCost: Number(e.target.value) })} />
+              <FormNumber label={`Print Cost (${editingContract.currency || 'USD'})`} min={0} value={editingContract.printingCost} onChange={(e: any) => setEditingContract({ ...editingContract, printingCost: Number(e.target.value) })} />
+            </FormSection>
+            <FormSection title="Status & Details">
+              <FormSelect label="Currency" value={editingContract.currency || 'USD'} onChange={(e: any) => setEditingContract({ ...editingContract, currency: e.target.value as Currency })} options={CURRENCIES.map(c => ({ value: c, label: c }))} />
+              <FormSelect label="Status" value={editingContract.status} onChange={(e: any) => setEditingContract({ ...editingContract, status: e.target.value as Contract['status'] })} options={[
                 { value: 'Active', label: 'Active' },
                 { value: 'Pending', label: 'Pending' },
                 { value: 'Expired', label: 'Expired' },
                 { value: 'Archived', label: 'Archived' },
               ]} />
-              <MinimalInput label="Details" value={editingContract.details} onChange={(e: any) => setEditingContract({ ...editingContract, details: e.target.value })} />
-            </div>
-            <label className="flex items-center gap-3 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={editingContract.hasVat}
-                onChange={(e) => setEditingContract({ ...editingContract, hasVat: e.target.checked })}
-                className="w-4 h-4 accent-slate-900"
-              />
-              <span className="text-sm font-medium text-slate-700">Apply VAT ({Math.round(VAT_RATE * 100)}%)</span>
-            </label>
+              <FormInput label="Details" value={editingContract.details} onChange={(e: any) => setEditingContract({ ...editingContract, details: e.target.value })} />
+            </FormSection>
+            <FormCheckbox
+              label={`Apply VAT (${Math.round(VAT_RATE * 100)}%)`}
+              checked={editingContract.hasVat}
+              onChange={(checked) => setEditingContract({ ...editingContract, hasVat: checked })}
+            />
             {/* Live recompute chip so editors see the saved total before they
                 commit. Uses the same computeContractValue helper as create so
                 both paths produce identical values. */}

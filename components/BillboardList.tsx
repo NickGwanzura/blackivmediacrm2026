@@ -5,39 +5,11 @@ import { getBillboards, addBillboard, updateBillboard, deleteBillboard, mockClie
 import { formatCurrency } from '../utils/sanitizers';
 import { computeContractValue } from '../utils/contractMath';
 import { estimateLocationDetails } from '../services/aiService';
-import { MapPin, X, Edit2, Plus, Image as ImageIcon, Map as MapIcon, Grid as GridIcon, Trash2, Share2, Eye, EyeOff, Copy, List as ListIcon, Search, Link2, FileUp, FileDown, Sparkles, Loader2, Filter, Check, RefreshCw, RectangleHorizontal } from 'lucide-react';
+import { MapPin, X, Edit2, Plus, Image as ImageIcon, Map as MapIcon, Grid as GridIcon, Trash2, Share2, Eye, EyeOff, Copy, List as ListIcon, Search, Link2, FileUp, FileDown, Sparkles, Loader2, Filter, RefreshCw, RectangleHorizontal } from 'lucide-react';
 import L from 'leaflet';
 import { useToast } from './Toast';
 import { AccessibleModal, ModalButton } from './ui/AccessibleModal';
-
-const MinimalInput = ({ label, value, onChange, type = "text", required = false }: any) => (
-  <div className="group relative">
-    <input type={type} required={required} value={value} onChange={onChange} placeholder=" " className="peer w-full px-0 py-2.5 border-b border-slate-200 bg-transparent text-slate-800 focus:border-slate-800 focus:ring-0 outline-none transition-all font-medium placeholder-transparent" />
-    <label className="absolute left-0 -top-2.5 text-xs text-slate-400 font-medium transition-all peer-placeholder-shown:text-sm peer-placeholder-shown:text-slate-400 peer-placeholder-shown:top-2.5 peer-focus:-top-2.5 peer-focus:text-xs peer-focus:text-slate-800 uppercase tracking-wide">{label}</label>
-  </div>
-);
-
-const MinimalSelect = ({ label, value, onChange, options }: any) => (
-  <div className="group relative">
-    <select value={value} onChange={onChange} className="peer w-full px-0 py-2.5 border-b border-slate-200 bg-transparent text-slate-800 focus:border-slate-800 focus:ring-0 outline-none transition-all font-medium appearance-none cursor-pointer" >
-      {options.map((opt: any) => (<option key={opt.value} value={opt.value}>{opt.label}</option>))}
-    </select>
-    <label className="absolute left-0 -top-2.5 text-xs text-slate-400 font-medium uppercase tracking-wide">{label}</label>
-  </div>
-);
-
-const MinimalTextArea = ({ label, value, onChange, required = false }: any) => (
-  <div className="group relative pt-4">
-    <textarea required={required} value={value} onChange={onChange} placeholder=" " className="peer w-full px-0 py-2.5 border-b border-slate-200 bg-transparent text-slate-800 focus:border-slate-800 focus:ring-0 outline-none transition-all font-medium placeholder-transparent resize-none h-20" />
-    <label className="absolute left-0 top-0 text-xs text-slate-400 font-medium transition-all uppercase tracking-wide">{label}</label>
-  </div>
-);
-
-const Checkbox = ({ checked, onChange, className }: any) => (
-    <div onClick={(e) => { e.stopPropagation(); onChange(!checked); }} className={`w-5 h-5 rounded border flex items-center justify-center cursor-pointer transition-all ${checked ? 'bg-indigo-600 border-indigo-600' : 'bg-white border-slate-300 hover:border-indigo-400'} ${className}`}>
-        {checked && <Check size={12} className="text-white" />}
-    </div>
-);
+import { FormInput, FormSelect, FormTextArea, FormSection, FormRow, FormNumber, FormCheckbox } from './ui/Form';
 
 interface BillboardCardProps {
   billboard: Billboard;
@@ -54,7 +26,7 @@ const BillboardCard: React.FC<BillboardCardProps> = ({ billboard, onEdit, onDele
     <div className={`group bg-white rounded-3xl shadow-sm hover:shadow-2xl hover:shadow-slate-200/50 transition-all duration-500 overflow-hidden flex flex-col h-full hover:-translate-y-1 relative ${selected ? 'ring-2 ring-indigo-500 ring-offset-2' : 'border border-slate-100'}`}>
         {!readOnly && (
           <div className="absolute top-4 left-4 z-20" onClick={(e) => e.stopPropagation()}>
-               <Checkbox checked={selected} onChange={() => onSelect(billboard.id)} className="shadow-md" />
+               <FormCheckbox label="Select" checked={selected} onChange={() => onSelect(billboard.id)} className="shadow-md" />
           </div>
         )}
         <div className="h-56 bg-slate-200 relative overflow-hidden shrink-0">
@@ -579,8 +551,8 @@ export const BillboardList: React.FC<BillboardListProps> = ({ readOnly = false }
               <div className="bg-white/80 backdrop-blur-xl rounded-3xl border border-white/60 shadow-sm overflow-hidden h-full flex flex-col">
                   <div className="overflow-x-auto">
                       <table className="w-full text-left text-sm text-slate-600 min-w-[800px]">
-                          <thead className="bg-slate-50/80 border-b border-slate-200 sticky top-0 z-10 backdrop-blur-md"><tr><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider w-16"><Checkbox checked={selectedIds.length === filteredBillboards.length && filteredBillboards.length > 0} onChange={handleSelectAll} /></th><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider">Asset</th><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider">Location</th><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider">Type</th><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider">Status</th><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider">Rate</th><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider text-right">Actions</th></tr></thead>
-                          <tbody className="divide-y divide-slate-100">{filteredBillboards.map(b => (<tr key={b.id} className="hover:bg-indigo-50/30 transition-colors"><td className="px-6 py-4"><Checkbox checked={selectedIds.includes(b.id)} onChange={() => handleSelect(b.id)} /></td><td className="px-6 py-4 flex items-center gap-4"><div className="w-14 h-14 rounded-xl bg-slate-100 overflow-hidden shrink-0 border border-slate-200 shadow-sm">{b.imageUrl ? <img src={b.imageUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-slate-300"><ImageIcon size={20}/></div>}</div><span className="font-bold text-slate-900 text-base">{b.name}</span></td><td className="px-6 py-4"><div className="text-slate-800 font-bold">{b.town}</div><div className="text-xs text-slate-500 font-medium">{b.location}</div></td><td className="px-6 py-4"><span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider ${b.type === 'LED' ? 'bg-indigo-100 text-indigo-700' : 'bg-orange-100 text-orange-700'}`}>{b.type}</span></td><td className="px-6 py-4">{b.type === BillboardType.Static ? (<div className="flex gap-2"><div className={`px-2.5 py-1 rounded-lg text-xs font-bold ${b.sideAStatus === 'Available' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>A</div><div className={`px-2.5 py-1 rounded-lg text-xs font-bold ${b.sideBStatus === 'Available' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>B</div></div>) : (<div className="flex items-center gap-2"><div className="h-2 w-20 bg-slate-100 rounded-full overflow-hidden border border-slate-200"><div className="h-full bg-gradient-to-r from-indigo-500 to-violet-500" style={{width: `${(b.rentedSlots! / b.totalSlots!) * 100}%`}}></div></div><span className="text-xs font-bold">{b.rentedSlots}/{b.totalSlots}</span></div>)}</td><td className="px-6 py-4 font-mono text-xs font-bold text-slate-700">{b.type === BillboardType.Static ? `${formatCurrency(b.sideARate ?? 0, b.currency)} | ${formatCurrency(b.sideBRate ?? 0, b.currency)}` : `${formatCurrency(b.ratePerSlot ?? 0, b.currency)}/slot`}</td><td className="px-6 py-4 text-right"><div className="flex justify-end gap-2">{!readOnly && <button onClick={() => setEditingBillboard(b)} className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-all"><Edit2 size={16}/></button>}<button onClick={() => shareBillboard(b)} className="p-2 text-indigo-400 hover:text-indigo-900 hover:bg-indigo-50 rounded-xl transition-all"><Link2 size={16}/></button>{!readOnly && <button onClick={() => setBillboardToDelete(b)} className="p-2 text-rose-400 hover:text-rose-900 hover:bg-rose-50 rounded-xl transition-all"><Trash2 size={16}/></button>}</div></td></tr>))}</tbody></table></div></div>
+                          <thead className="bg-slate-50/80 border-b border-slate-200 sticky top-0 z-10 backdrop-blur-md"><tr><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider w-16"><FormCheckbox label="Select All" checked={selectedIds.length === filteredBillboards.length && filteredBillboards.length > 0} onChange={handleSelectAll} /></th><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider">Asset</th><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider">Location</th><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider">Type</th><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider">Status</th><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider">Rate</th><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider text-right">Actions</th></tr></thead>
+                          <tbody className="divide-y divide-slate-100">{filteredBillboards.map(b => (<tr key={b.id} className="hover:bg-indigo-50/30 transition-colors"><td className="px-6 py-4"><FormCheckbox label="Select" checked={selectedIds.includes(b.id)} onChange={() => handleSelect(b.id)} /></td><td className="px-6 py-4 flex items-center gap-4"><div className="w-14 h-14 rounded-xl bg-slate-100 overflow-hidden shrink-0 border border-slate-200 shadow-sm">{b.imageUrl ? <img src={b.imageUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-slate-300"><ImageIcon size={20}/></div>}</div><span className="font-bold text-slate-900 text-base">{b.name}</span></td><td className="px-6 py-4"><div className="text-slate-800 font-bold">{b.town}</div><div className="text-xs text-slate-500 font-medium">{b.location}</div></td><td className="px-6 py-4"><span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider ${b.type === 'LED' ? 'bg-indigo-100 text-indigo-700' : 'bg-orange-100 text-orange-700'}`}>{b.type}</span></td><td className="px-6 py-4">{b.type === BillboardType.Static ? (<div className="flex gap-2"><div className={`px-2.5 py-1 rounded-lg text-xs font-bold ${b.sideAStatus === 'Available' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>A</div><div className={`px-2.5 py-1 rounded-lg text-xs font-bold ${b.sideBStatus === 'Available' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>B</div></div>) : (<div className="flex items-center gap-2"><div className="h-2 w-20 bg-slate-100 rounded-full overflow-hidden border border-slate-200"><div className="h-full bg-gradient-to-r from-indigo-500 to-violet-500" style={{width: `${(b.rentedSlots! / b.totalSlots!) * 100}%`}}></div></div><span className="text-xs font-bold">{b.rentedSlots}/{b.totalSlots}</span></div>)}</td><td className="px-6 py-4 font-mono text-xs font-bold text-slate-700">{b.type === BillboardType.Static ? `${formatCurrency(b.sideARate ?? 0, b.currency)} | ${formatCurrency(b.sideBRate ?? 0, b.currency)}` : `${formatCurrency(b.ratePerSlot ?? 0, b.currency)}/slot`}</td><td className="px-6 py-4 text-right"><div className="flex justify-end gap-2">{!readOnly && <button onClick={() => setEditingBillboard(b)} className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-all"><Edit2 size={16}/></button>}<button onClick={() => shareBillboard(b)} className="p-2 text-indigo-400 hover:text-indigo-900 hover:bg-indigo-50 rounded-xl transition-all"><Link2 size={16}/></button>{!readOnly && <button onClick={() => setBillboardToDelete(b)} className="p-2 text-rose-400 hover:text-rose-900 hover:bg-rose-50 rounded-xl transition-all"><Trash2 size={16}/></button>}</div></td></tr>))}</tbody></table></div></div>
           ) : (
             <div className="pb-8 overflow-y-auto max-h-full pr-2">
                 {(filter === 'All' || filter === 'LED') && ledBoards.length > 0 && (<div className="mb-12"><h3 className="text-2xl font-bold text-slate-900 mb-6 flex items-center gap-3"><span className="w-1.5 h-8 bg-gradient-to-b from-indigo-500 to-violet-600 rounded-full shadow-lg shadow-indigo-500/30"></span>Digital Inventory <span className="text-sm font-bold text-slate-500 bg-white border border-slate-200 px-3 py-1 rounded-lg ml-2 shadow-sm">{ledBoards.length}</span></h3><div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">{ledBoards.map(billboard => (<BillboardCard key={billboard.id} billboard={billboard} onEdit={setEditingBillboard} onDelete={setBillboardToDelete} getClientName={getClientName} onShare={shareBillboard} selected={selectedIds.includes(billboard.id)} onSelect={handleSelect} readOnly={readOnly} />))}</div></div>)}
@@ -629,7 +601,7 @@ export const BillboardList: React.FC<BillboardListProps> = ({ readOnly = false }
         }
       >
         <form id="batch-town-form" onSubmit={handleBatchEditTown}>
-          <MinimalSelect
+          <FormSelect
             label="New Town"
             value={batchEditValue}
             onChange={(e: any) => setBatchEditValue(e.target.value)}
@@ -677,57 +649,64 @@ export const BillboardList: React.FC<BillboardListProps> = ({ readOnly = false }
       >
         <form id="add-billboard-form" onSubmit={handleAddBillboard} className="grid grid-cols-1 md:grid-cols-2 gap-8">
           <div className="space-y-6">
-            <MinimalInput label="Name" value={newBillboard.name} onChange={(e: any) => setNewBillboard({...newBillboard, name: e.target.value})} required />
-            <div className="grid grid-cols-2 gap-4">
-              <MinimalInput label="Location Description" value={newBillboard.location} onChange={(e: any) => setNewBillboard({...newBillboard, location: e.target.value})} required />
-              <MinimalSelect label="Town / City" value={newBillboard.town} onChange={(e: any) => setNewBillboard({...newBillboard, town: e.target.value})} options={ZIM_TOWNS.map(t => ({ value: t, label: t }))}/>
-            </div>
+            <FormSection title="Basic Information">
+              <FormRow>
+                <FormInput label="Name" value={newBillboard.name} onChange={(e: any) => setNewBillboard({...newBillboard, name: e.target.value})} required />
+              </FormRow>
+              <FormInput label="Location Description" value={newBillboard.location} onChange={(e: any) => setNewBillboard({...newBillboard, location: e.target.value})} required />
+              <FormSelect label="Town / City" value={newBillboard.town} onChange={(e: any) => setNewBillboard({...newBillboard, town: e.target.value})} options={ZIM_TOWNS.map(t => ({ value: t, label: t }))}/>
+              <FormSelect label="Type" value={newBillboard.type} onChange={(e: any) => setNewBillboard({...newBillboard, type: e.target.value})} options={[{ value: BillboardType.Static, label: 'Static (Side A/B)' }, { value: BillboardType.LED, label: 'LED (Slots)' }]}/>
+              <FormSelect label="Currency" value={newBillboard.currency || getDefaultCurrency()} onChange={(e: any) => setNewBillboard({...newBillboard, currency: e.target.value as Currency})} options={CURRENCIES.map(c => ({ value: c, label: c }))}/>
+            </FormSection>
             <div className="flex justify-end">
               <button type="button" onClick={() => handleAiAutofill(false)} disabled={isAutoFilling} className="flex items-center gap-2 text-xs font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg transition-colors">
                 {isAutoFilling ? <Loader2 size={14} className="animate-spin"/> : <Sparkles size={14}/>} AI Auto-Fill & Coordinates
               </button>
             </div>
-            <MinimalSelect label="Type" value={newBillboard.type} onChange={(e: any) => setNewBillboard({...newBillboard, type: e.target.value})} options={[{ value: BillboardType.Static, label: 'Static (Side A/B)' }, { value: BillboardType.LED, label: 'LED (Slots)' }]}/>
-            <MinimalSelect label="Currency" value={newBillboard.currency || getDefaultCurrency()} onChange={(e: any) => setNewBillboard({...newBillboard, currency: e.target.value as Currency})} options={CURRENCIES.map(c => ({ value: c, label: c }))}/>
-            <MinimalTextArea label="Visibility & Traffic Analysis" value={newBillboard.visibility || ''} onChange={(e: any) => setNewBillboard({...newBillboard, visibility: e.target.value})}/>
+            <FormSection title="Analysis">
+              <FormRow>
+                <FormTextArea label="Visibility & Traffic Analysis" value={newBillboard.visibility || ''} onChange={(e: any) => setNewBillboard({...newBillboard, visibility: e.target.value})}/>
+              </FormRow>
+            </FormSection>
           </div>
           <div className="space-y-6">
-            <div className="space-y-3">
-              <p className="text-xs font-bold uppercase text-slate-400 tracking-wider">Asset Image</p>
-              <div className="flex items-center gap-4">
-                <div className="w-28 h-28 bg-slate-50 rounded-2xl overflow-hidden border border-slate-200 flex items-center justify-center shadow-inner">{newBillboard.imageUrl ? <img src={newBillboard.imageUrl} className="w-full h-full object-cover"/> : <ImageIcon className="text-slate-300 w-8 h-8" />}</div>
-                <label className="flex-1 cursor-pointer group">
-                  <div className="h-28 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center text-slate-400 group-hover:border-indigo-300 group-hover:text-indigo-500 transition-colors bg-slate-50/50 group-hover:bg-indigo-50/30">
-                    <span className="text-xs font-bold uppercase tracking-wider mb-1">Click to Upload</span>
-                    <span className="text-[10px]">JPG, PNG (Max 5MB)</span>
+            <FormSection title="Asset Image">
+              <FormRow>
+                <div className="space-y-3">
+                  <div className="flex items-center gap-4">
+                    <div className="w-28 h-28 bg-slate-50 rounded-2xl overflow-hidden border border-slate-200 flex items-center justify-center shadow-inner">{newBillboard.imageUrl ? <img src={newBillboard.imageUrl} className="w-full h-full object-cover"/> : <ImageIcon className="text-slate-300 w-8 h-8" />}</div>
+                    <label className="flex-1 cursor-pointer group">
+                      <div className="h-28 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center text-slate-400 group-hover:border-indigo-300 group-hover:text-indigo-500 transition-colors bg-slate-50/50 group-hover:bg-indigo-50/30">
+                        <span className="text-xs font-bold uppercase tracking-wider mb-1">Click to Upload</span>
+                        <span className="text-[10px]">JPG, PNG (Max 5MB)</span>
+                      </div>
+                      <input type="file" className="hidden" accept="image/*" onChange={(e) => handleImageUpload(e, false)} />
+                    </label>
                   </div>
-                  <input type="file" className="hidden" accept="image/*" onChange={(e) => handleImageUpload(e, false)} />
-                </label>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4"><MinimalInput label="Width (m)" type="number" value={newBillboard.width} onChange={(e: any) => setNewBillboard({...newBillboard, width: Number(e.target.value)})} /><MinimalInput label="Height (m)" type="number" value={newBillboard.height} onChange={(e: any) => setNewBillboard({...newBillboard, height: Number(e.target.value)})} /></div>
-            <div className="grid grid-cols-2 gap-4"><MinimalInput label="Latitude" type="number" value={newBillboard.coordinates?.lat} onChange={(e: any) => setNewBillboard({...newBillboard, coordinates: {...newBillboard.coordinates!, lat: Number(e.target.value)}})} /><MinimalInput label="Longitude" type="number" value={newBillboard.coordinates?.lng} onChange={(e: any) => setNewBillboard({...newBillboard, coordinates: {...newBillboard.coordinates!, lng: Number(e.target.value)}})} /></div>
+                </div>
+              </FormRow>
+            </FormSection>
+            <FormSection title="Dimensions & Location">
+              <FormNumber label="Width (m)" value={newBillboard.width} onChange={(e: any) => setNewBillboard({...newBillboard, width: Number(e.target.value)})} />
+              <FormNumber label="Height (m)" value={newBillboard.height} onChange={(e: any) => setNewBillboard({...newBillboard, height: Number(e.target.value)})} />
+              <FormNumber label="Latitude" value={newBillboard.coordinates?.lat} onChange={(e: any) => setNewBillboard({...newBillboard, coordinates: {...newBillboard.coordinates!, lat: Number(e.target.value)}})} />
+              <FormNumber label="Longitude" value={newBillboard.coordinates?.lng} onChange={(e: any) => setNewBillboard({...newBillboard, coordinates: {...newBillboard.coordinates!, lng: Number(e.target.value)}})} />
+            </FormSection>
             {newBillboard.type === BillboardType.Static ? (
-              <div className="space-y-4 pt-2">
-                <p className="text-xs font-bold uppercase text-slate-400 tracking-wider">Monthly Rates</p>
-                <div className="grid grid-cols-2 gap-4">
-                  <MinimalInput label={`Side A Rate (${newBillboard.currency || getDefaultCurrency()})`} type="number" value={newBillboard.sideARate} onChange={(e: any) => setNewBillboard({...newBillboard, sideARate: Number(e.target.value)})} />
-                  <MinimalInput label={`Side B Rate (${newBillboard.currency || getDefaultCurrency()})`} type="number" value={newBillboard.sideBRate} onChange={(e: any) => setNewBillboard({...newBillboard, sideBRate: Number(e.target.value)})} />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <MinimalSelect label="Side A Status" value={newBillboard.sideAStatus} onChange={(e: any) => setNewBillboard({...newBillboard, sideAStatus: e.target.value})} options={[{value: 'Available', label: 'Available'}, {value: 'Rented', label: 'Rented'}]}/>
-                  <MinimalSelect label="Side B Status" value={newBillboard.sideBStatus} onChange={(e: any) => setNewBillboard({...newBillboard, sideBStatus: e.target.value})} options={[{value: 'Available', label: 'Available'}, {value: 'Rented', label: 'Rented'}]}/>
-                </div>
-              </div>
+              <FormSection title="Monthly Rates">
+                <FormNumber label={`Side A Rate (${newBillboard.currency || getDefaultCurrency()})`} value={newBillboard.sideARate} onChange={(e: any) => setNewBillboard({...newBillboard, sideARate: Number(e.target.value)})} />
+                <FormNumber label={`Side B Rate (${newBillboard.currency || getDefaultCurrency()})`} value={newBillboard.sideBRate} onChange={(e: any) => setNewBillboard({...newBillboard, sideBRate: Number(e.target.value)})} />
+                <FormSelect label="Side A Status" value={newBillboard.sideAStatus} onChange={(e: any) => setNewBillboard({...newBillboard, sideAStatus: e.target.value})} options={[{value: 'Available', label: 'Available'}, {value: 'Rented', label: 'Rented'}]}/>
+                <FormSelect label="Side B Status" value={newBillboard.sideBStatus} onChange={(e: any) => setNewBillboard({...newBillboard, sideBStatus: e.target.value})} options={[{value: 'Available', label: 'Available'}, {value: 'Rented', label: 'Rented'}]}/>
+              </FormSection>
             ) : (
-              <div className="space-y-4 pt-2">
-                <p className="text-xs font-bold uppercase text-slate-400 tracking-wider">LED Configuration</p>
-                <div className="grid grid-cols-2 gap-4">
-                  <MinimalInput label="Total Slots" type="number" value={newBillboard.totalSlots} onChange={(e: any) => setNewBillboard({...newBillboard, totalSlots: Number(e.target.value)})} />
-                  <MinimalInput label={`Rate / Slot (${newBillboard.currency || getDefaultCurrency()})`} type="number" value={newBillboard.ratePerSlot} onChange={(e: any) => setNewBillboard({...newBillboard, ratePerSlot: Number(e.target.value)})} />
-                </div>
-                <MinimalInput label="Initially Rented Slots" type="number" value={newBillboard.rentedSlots} onChange={(e: any) => setNewBillboard({...newBillboard, rentedSlots: Number(e.target.value)})} />
-              </div>
+              <FormSection title="LED Configuration">
+                <FormNumber label="Total Slots" value={newBillboard.totalSlots} onChange={(e: any) => setNewBillboard({...newBillboard, totalSlots: Number(e.target.value)})} />
+                <FormNumber label={`Rate / Slot (${newBillboard.currency || getDefaultCurrency()})`} value={newBillboard.ratePerSlot} onChange={(e: any) => setNewBillboard({...newBillboard, ratePerSlot: Number(e.target.value)})} />
+                <FormRow>
+                  <FormNumber label="Initially Rented Slots" value={newBillboard.rentedSlots} onChange={(e: any) => setNewBillboard({...newBillboard, rentedSlots: Number(e.target.value)})} />
+                </FormRow>
+              </FormSection>
             )}
           </div>
         </form>
@@ -752,80 +731,87 @@ export const BillboardList: React.FC<BillboardListProps> = ({ readOnly = false }
         {editingBillboard && (
           <form id="edit-billboard-form" onSubmit={handleSaveEdit} className="grid grid-cols-1 md:grid-cols-2 gap-8">
             <div className="space-y-6">
-              <MinimalInput label="Name" value={editingBillboard.name} onChange={(e: any) => setEditingBillboard({...editingBillboard, name: e.target.value})} required />
-              <div className="grid grid-cols-2 gap-4">
-                <MinimalInput label="Location Description" value={editingBillboard.location} onChange={(e: any) => setEditingBillboard({...editingBillboard, location: e.target.value})} required />
-                <MinimalSelect label="Town / City" value={editingBillboard.town} onChange={(e: any) => setEditingBillboard({...editingBillboard, town: e.target.value})} options={ZIM_TOWNS.map(t => ({ value: t, label: t }))}/>
-              </div>
+              <FormSection title="Basic Information">
+                <FormRow>
+                  <FormInput label="Name" value={editingBillboard.name} onChange={(e: any) => setEditingBillboard({...editingBillboard, name: e.target.value})} required />
+                </FormRow>
+                <FormInput label="Location Description" value={editingBillboard.location} onChange={(e: any) => setEditingBillboard({...editingBillboard, location: e.target.value})} required />
+                <FormSelect label="Town / City" value={editingBillboard.town} onChange={(e: any) => setEditingBillboard({...editingBillboard, town: e.target.value})} options={ZIM_TOWNS.map(t => ({ value: t, label: t }))}/>
+                <FormSelect
+                  label="Type"
+                  value={editingBillboard.type}
+                  onChange={(e: any) => {
+                    const newType = e.target.value;
+                    setEditingBillboard({
+                      ...editingBillboard,
+                      type: newType,
+                      // Reset rates if switching type to avoid confusion or mixed data
+                      ...(newType === BillboardType.LED ? {
+                        sideARate: 0,
+                        sideBRate: 0,
+                        totalSlots: editingBillboard.totalSlots || 10,
+                        ratePerSlot: editingBillboard.ratePerSlot || 0
+                      } : {
+                        ratePerSlot: 0,
+                        totalSlots: 0,
+                        sideARate: editingBillboard.sideARate || 0,
+                        sideBRate: editingBillboard.sideBRate || 0
+                      })
+                    });
+                  }}
+                  options={[{ value: BillboardType.Static, label: 'Static (Side A/B)' }, { value: BillboardType.LED, label: 'LED (Slots)' }]}
+                />
+                <FormSelect label="Currency" value={editingBillboard.currency || getDefaultCurrency()} onChange={(e: any) => setEditingBillboard({...editingBillboard, currency: e.target.value as Currency})} options={CURRENCIES.map(c => ({ value: c, label: c }))}/>
+              </FormSection>
               <div className="flex justify-end">
                 <button type="button" onClick={() => handleAiAutofill(true)} disabled={isAutoFilling} className="flex items-center gap-2 text-xs font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg transition-colors">
                   {isAutoFilling ? <Loader2 size={14} className="animate-spin"/> : <Sparkles size={14}/>} AI Auto-Fill & Coordinates
                 </button>
               </div>
-              <MinimalSelect
-                label="Type"
-                value={editingBillboard.type}
-                onChange={(e: any) => {
-                  const newType = e.target.value;
-                  setEditingBillboard({
-                    ...editingBillboard,
-                    type: newType,
-                    // Reset rates if switching type to avoid confusion or mixed data
-                    ...(newType === BillboardType.LED ? {
-                      sideARate: 0,
-                      sideBRate: 0,
-                      totalSlots: editingBillboard.totalSlots || 10,
-                      ratePerSlot: editingBillboard.ratePerSlot || 0
-                    } : {
-                      ratePerSlot: 0,
-                      totalSlots: 0,
-                      sideARate: editingBillboard.sideARate || 0,
-                      sideBRate: editingBillboard.sideBRate || 0
-                    })
-                  });
-                }}
-                options={[{ value: BillboardType.Static, label: 'Static (Side A/B)' }, { value: BillboardType.LED, label: 'LED (Slots)' }]}
-              />
-              <MinimalSelect label="Currency" value={editingBillboard.currency || getDefaultCurrency()} onChange={(e: any) => setEditingBillboard({...editingBillboard, currency: e.target.value as Currency})} options={CURRENCIES.map(c => ({ value: c, label: c }))}/>
-              <MinimalTextArea label="Visibility & Traffic Analysis" value={editingBillboard.visibility || ''} onChange={(e: any) => setEditingBillboard({...editingBillboard, visibility: e.target.value})}/>
+              <FormSection title="Analysis">
+                <FormRow>
+                  <FormTextArea label="Visibility & Traffic Analysis" value={editingBillboard.visibility || ''} onChange={(e: any) => setEditingBillboard({...editingBillboard, visibility: e.target.value})}/>
+                </FormRow>
+              </FormSection>
             </div>
             <div className="space-y-6">
-              <div className="space-y-3">
-                <p className="text-xs font-bold uppercase text-slate-400 tracking-wider">Asset Image</p>
-                <div className="flex items-center gap-4">
-                  <div className="w-28 h-28 bg-slate-50 rounded-2xl overflow-hidden border border-slate-200 flex items-center justify-center shadow-inner">{editingBillboard.imageUrl ? <img src={editingBillboard.imageUrl} className="w-full h-full object-cover"/> : <ImageIcon className="text-slate-300 w-8 h-8" />}</div>
-                  <label className="flex-1 cursor-pointer group">
-                    <div className="h-28 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center text-slate-400 group-hover:border-indigo-300 group-hover:text-indigo-500 transition-colors bg-slate-50/50 group-hover:bg-indigo-50/30">
-                      <span className="text-xs font-bold uppercase tracking-wider mb-1">Click to Upload</span>
-                      <span className="text-[10px]">JPG, PNG (Max 5MB)</span>
+              <FormSection title="Asset Image">
+                <FormRow>
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-4">
+                      <div className="w-28 h-28 bg-slate-50 rounded-2xl overflow-hidden border border-slate-200 flex items-center justify-center shadow-inner">{editingBillboard.imageUrl ? <img src={editingBillboard.imageUrl} className="w-full h-full object-cover"/> : <ImageIcon className="text-slate-300 w-8 h-8" />}</div>
+                      <label className="flex-1 cursor-pointer group">
+                        <div className="h-28 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center text-slate-400 group-hover:border-indigo-300 group-hover:text-indigo-500 transition-colors bg-slate-50/50 group-hover:bg-indigo-50/30">
+                          <span className="text-xs font-bold uppercase tracking-wider mb-1">Click to Upload</span>
+                          <span className="text-[10px]">JPG, PNG (Max 5MB)</span>
+                        </div>
+                        <input type="file" className="hidden" accept="image/*" onChange={(e) => handleImageUpload(e, true)} />
+                      </label>
                     </div>
-                    <input type="file" className="hidden" accept="image/*" onChange={(e) => handleImageUpload(e, true)} />
-                  </label>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4"><MinimalInput label="Width (m)" type="number" value={editingBillboard.width} onChange={(e: any) => setEditingBillboard({...editingBillboard, width: Number(e.target.value)})} /><MinimalInput label="Height (m)" type="number" value={editingBillboard.height} onChange={(e: any) => setEditingBillboard({...editingBillboard, height: Number(e.target.value)})} /></div>
-              <div className="grid grid-cols-2 gap-4"><MinimalInput label="Latitude" type="number" value={editingBillboard.coordinates?.lat} onChange={(e: any) => setEditingBillboard({...editingBillboard, coordinates: {...editingBillboard.coordinates!, lat: Number(e.target.value)}})} /><MinimalInput label="Longitude" type="number" value={editingBillboard.coordinates?.lng} onChange={(e: any) => setEditingBillboard({...editingBillboard, coordinates: {...editingBillboard.coordinates!, lng: Number(e.target.value)}})} /></div>
+                  </div>
+                </FormRow>
+              </FormSection>
+              <FormSection title="Dimensions & Location">
+                <FormNumber label="Width (m)" value={editingBillboard.width} onChange={(e: any) => setEditingBillboard({...editingBillboard, width: Number(e.target.value)})} />
+                <FormNumber label="Height (m)" value={editingBillboard.height} onChange={(e: any) => setEditingBillboard({...editingBillboard, height: Number(e.target.value)})} />
+                <FormNumber label="Latitude" value={editingBillboard.coordinates?.lat} onChange={(e: any) => setEditingBillboard({...editingBillboard, coordinates: {...editingBillboard.coordinates!, lat: Number(e.target.value)}})} />
+                <FormNumber label="Longitude" value={editingBillboard.coordinates?.lng} onChange={(e: any) => setEditingBillboard({...editingBillboard, coordinates: {...editingBillboard.coordinates!, lng: Number(e.target.value)}})} />
+              </FormSection>
               {editingBillboard.type === BillboardType.Static ? (
-                <div className="space-y-4 pt-2">
-                  <p className="text-xs font-bold uppercase text-slate-400 tracking-wider">Monthly Rates</p>
-                  <div className="grid grid-cols-2 gap-4">
-                    <MinimalInput label={`Side A Rate (${editingBillboard.currency || getDefaultCurrency()})`} type="number" value={editingBillboard.sideARate} onChange={(e: any) => setEditingBillboard({...editingBillboard, sideARate: Number(e.target.value)})} />
-                    <MinimalInput label={`Side B Rate (${editingBillboard.currency || getDefaultCurrency()})`} type="number" value={editingBillboard.sideBRate} onChange={(e: any) => setEditingBillboard({...editingBillboard, sideBRate: Number(e.target.value)})} />
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <MinimalSelect label="Side A Status" value={editingBillboard.sideAStatus} onChange={(e: any) => setEditingBillboard({...editingBillboard, sideAStatus: e.target.value})} options={[{value: 'Available', label: 'Available'}, {value: 'Rented', label: 'Rented'}]}/>
-                    <MinimalSelect label="Side B Status" value={editingBillboard.sideBStatus} onChange={(e: any) => setEditingBillboard({...editingBillboard, sideBStatus: e.target.value})} options={[{value: 'Available', label: 'Available'}, {value: 'Rented', label: 'Rented'}]}/>
-                  </div>
-                </div>
+                <FormSection title="Monthly Rates">
+                  <FormNumber label={`Side A Rate (${editingBillboard.currency || getDefaultCurrency()})`} value={editingBillboard.sideARate} onChange={(e: any) => setEditingBillboard({...editingBillboard, sideARate: Number(e.target.value)})} />
+                  <FormNumber label={`Side B Rate (${editingBillboard.currency || getDefaultCurrency()})`} value={editingBillboard.sideBRate} onChange={(e: any) => setEditingBillboard({...editingBillboard, sideBRate: Number(e.target.value)})} />
+                  <FormSelect label="Side A Status" value={editingBillboard.sideAStatus} onChange={(e: any) => setEditingBillboard({...editingBillboard, sideAStatus: e.target.value})} options={[{value: 'Available', label: 'Available'}, {value: 'Rented', label: 'Rented'}]}/>
+                  <FormSelect label="Side B Status" value={editingBillboard.sideBStatus} onChange={(e: any) => setEditingBillboard({...editingBillboard, sideBStatus: e.target.value})} options={[{value: 'Available', label: 'Available'}, {value: 'Rented', label: 'Rented'}]}/>
+                </FormSection>
               ) : (
-                <div className="space-y-4 pt-2">
-                  <p className="text-xs font-bold uppercase text-slate-400 tracking-wider">LED Configuration</p>
-                  <div className="grid grid-cols-2 gap-4">
-                    <MinimalInput label="Total Slots" type="number" value={editingBillboard.totalSlots} onChange={(e: any) => setEditingBillboard({...editingBillboard, totalSlots: Number(e.target.value)})} />
-                    <MinimalInput label={`Rate / Slot (${editingBillboard.currency || getDefaultCurrency()})`} type="number" value={editingBillboard.ratePerSlot} onChange={(e: any) => setEditingBillboard({...editingBillboard, ratePerSlot: Number(e.target.value)})} />
-                  </div>
-                  <MinimalInput label="Rented Slots" type="number" value={editingBillboard.rentedSlots} onChange={(e: any) => setEditingBillboard({...editingBillboard, rentedSlots: Number(e.target.value)})} />
-                </div>
+                <FormSection title="LED Configuration">
+                  <FormNumber label="Total Slots" value={editingBillboard.totalSlots} onChange={(e: any) => setEditingBillboard({...editingBillboard, totalSlots: Number(e.target.value)})} />
+                  <FormNumber label={`Rate / Slot (${editingBillboard.currency || getDefaultCurrency()})`} value={editingBillboard.ratePerSlot} onChange={(e: any) => setEditingBillboard({...editingBillboard, ratePerSlot: Number(e.target.value)})} />
+                  <FormRow>
+                    <FormNumber label="Rented Slots" value={editingBillboard.rentedSlots} onChange={(e: any) => setEditingBillboard({...editingBillboard, rentedSlots: Number(e.target.value)})} />
+                  </FormRow>
+                </FormSection>
               )}
             </div>
           </form>

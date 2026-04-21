@@ -7,41 +7,13 @@ import { getCurrentUser, approveUser as approveUserApi, inviteUser as inviteUser
 import { Shield, Download, Phone, MapPin, Edit2, Trash2, AlertTriangle, Cloud, Upload, History, RefreshCw, Database, FileUp, FileDown, Clock, HardDrive, BookOpen, Loader2, Smartphone, Monitor, UserCheck, Mail, Send, KeyRound, Building, ScrollText, Lock, UserPlus, UserCog, Megaphone, CheckCircle2 } from 'lucide-react';
 import { broadcastAnnouncement, buildDualCurrencyAnnouncement, BroadcastResult } from '../services/emailService';
 import { AccessibleModal, ModalButton } from './ui/AccessibleModal';
+import { FormInput, FormSelect, FormSection, FormRow } from './ui/Form';
 import { User as UserType, CompanyProfile } from '../types';
 
 type InputChange = (e: React.ChangeEvent<HTMLInputElement>) => void;
 type SelectChange = (e: React.ChangeEvent<HTMLSelectElement>) => void;
 
-interface MinimalInputProps {
-  label: string;
-  value: string | number | undefined;
-  onChange: InputChange;
-  type?: string;
-  required?: boolean;
-  placeholder?: string;
-}
-const MinimalInput: React.FC<MinimalInputProps> = ({ label, value, onChange, type = "text", required = false }) => (
-  <div className="group relative">
-    <input type={type} required={required} value={value ?? ''} onChange={onChange} placeholder=" " className="peer w-full px-0 py-2.5 border-b border-slate-200 bg-transparent text-slate-800 focus:border-slate-800 focus:ring-0 outline-none transition-all font-medium placeholder-transparent" />
-    <label className="absolute left-0 -top-2.5 text-xs text-slate-400 font-medium transition-all peer-placeholder-shown:text-sm peer-placeholder-shown:text-slate-400 peer-placeholder-shown:top-2.5 peer-focus:-top-2.5 peer-focus:text-xs peer-focus:text-slate-800 uppercase tracking-wide">{label}</label>
-  </div>
-);
 
-interface SelectOption { value: string; label: string; }
-interface MinimalSelectProps {
-  label: string;
-  value: string;
-  onChange: SelectChange;
-  options: SelectOption[];
-}
-const MinimalSelect: React.FC<MinimalSelectProps> = ({ label, value, onChange, options }) => (
-  <div className="group relative">
-    <select value={value} onChange={onChange} className="peer w-full px-0 py-2.5 border-b border-slate-200 bg-transparent text-slate-800 focus:border-slate-800 focus:ring-0 outline-none transition-all font-medium appearance-none cursor-pointer">
-      {options.map(opt => (<option key={opt.value} value={opt.value}>{opt.label}</option>))}
-    </select>
-    <label className="absolute left-0 -top-2.5 text-xs text-slate-400 font-medium uppercase tracking-wide">{label}</label>
-  </div>
-);
 
 // RFC 4180 + formula-injection guard for CSV export. Spreadsheet apps
 // (Excel, LibreOffice) treat cells starting with =, +, -, @ as formulas,
@@ -412,7 +384,7 @@ export const Settings: React.FC = () => {
   return (
     <>
       <div className="space-y-8 animate-fade-in">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"><div><h2 className="text-4xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-slate-900 to-slate-600 mb-2">System Settings</h2><p className="text-slate-500 font-medium">Manage organization profile, users, and data</p></div><div className="flex bg-white rounded-full border border-slate-200 p-1 shadow-sm overflow-x-auto max-w-full"><button onClick={() => guardedSetTab('General')} className={`px-5 py-2 rounded-full text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'General' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-900'}`}>General</button><button onClick={() => guardedSetTab('Data')} className={`px-5 py-2 rounded-full text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'Data' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-900'}`}>Data</button>{isAdmin && <button onClick={() => guardedSetTab('Audit')} className={`px-5 py-2 rounded-full text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'Audit' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-900'}`}>Audit</button>}<button onClick={() => guardedSetTab('Features')} className={`px-5 py-2 rounded-full text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'Features' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-900'}`}>Features</button></div></div>
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"><div><h2 className="text-4xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-slate-900 to-slate-600 mb-2">System Settings</h2><p className="text-slate-500 font-medium">Manage organization profile, users, and data</p></div><div className="flex bg-white rounded-full border border-slate-200 p-1 shadow-sm overflow-x-auto max-w-full"><button onClick={() => guardedSetTab('General')} className={`px-5 py-2 rounded-full text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'General' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-900'}`}>General</button><button onClick={() => guardedSetTab('Data')} className={`px-5 py-2 rounded-full text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'Data' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-900'}`}>Data</button>{isAdmin && <button onClick={() => guardedSetTab('Audit')} className={`px-5 py-2 rounded-full text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'Audit' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-900'}`}>Audit</button>}<button onClick={() => guardedSetTab('Features')} className={`px-5 py-2 rounded-full text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'Features' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-900'}`}>Features</button><button onClick={() => guardedSetTab('ReleaseNotes')} className={`px-5 py-2 rounded-full text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'ReleaseNotes' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-900'}`}>Release Notes</button></div></div>
         {activeTab === 'General' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 animate-fade-in">
           <div className="lg:col-span-2 space-y-8">
@@ -422,36 +394,32 @@ export const Settings: React.FC = () => {
                 <h3 className="text-xl font-bold text-slate-800">Company Profile</h3>
                 {profileDirty && <span className="ml-auto text-[10px] font-bold uppercase tracking-wider text-amber-600 bg-amber-50 border border-amber-100 px-2 py-1 rounded-full">Unsaved changes</span>}
               </div>
-              <div className="space-y-8">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                  <div className="md:col-span-2"><MinimalInput label="Company Registered Name" value={profile.name} onChange={e => updateProfileField('name', e.target.value)} /></div>
-                  <MinimalInput label="Tax ID / VAT Number" value={profile.vatNumber} onChange={e => updateProfileField('vatNumber', e.target.value)} />
-                  <MinimalInput label="Registration Number" value={profile.regNumber} onChange={e => updateProfileField('regNumber', e.target.value)} />
-                </div>
-                <div className="border-t border-slate-50 pt-6">
-                  <h4 className="flex items-center gap-2 text-xs font-bold uppercase text-slate-400 tracking-wider mb-6"><Phone size={14} /> Contact Information</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                    <MinimalInput label="General Email" value={profile.email} onChange={e => updateProfileField('email', e.target.value)} type="email" />
-                    <MinimalInput label="Support Email" value={profile.supportEmail} onChange={e => updateProfileField('supportEmail', e.target.value)} type="email" />
-                    <MinimalInput label="Phone Number" value={profile.phone} onChange={e => updateProfileField('phone', e.target.value)} type="tel" />
-                    <MinimalInput label="Website" value={profile.website} onChange={e => updateProfileField('website', e.target.value)} />
-                  </div>
-                </div>
-                <div className="border-t border-slate-50 pt-6">
-                  <h4 className="flex items-center gap-2 text-xs font-bold uppercase text-slate-400 tracking-wider mb-6"><MapPin size={14} /> Location Details</h4>
-                  <div className="space-y-6">
-                    <MinimalInput label="Street Address" value={profile.address} onChange={e => updateProfileField('address', e.target.value)} />
-                    <div className="grid grid-cols-2 gap-8">
-                      <MinimalInput label="City" value={profile.city} onChange={e => updateProfileField('city', e.target.value)} />
-                      <MinimalInput label="Country" value={profile.country} onChange={e => updateProfileField('country', e.target.value)} />
-                    </div>
-                  </div>
-                </div>
+              <div className="space-y-6">
+                <FormSection title="Company Registration">
+                  <FormRow>
+                    <FormInput label="Company Registered Name" value={profile.name} onChange={e => updateProfileField('name', e.target.value)} />
+                  </FormRow>
+                  <FormInput label="Tax ID / VAT Number" value={profile.vatNumber} onChange={e => updateProfileField('vatNumber', e.target.value)} />
+                  <FormInput label="Registration Number" value={profile.regNumber} onChange={e => updateProfileField('regNumber', e.target.value)} />
+                </FormSection>
+                <FormSection title="Contact Information" icon={<Phone size={16} />}>
+                  <FormInput label="General Email" value={profile.email} onChange={e => updateProfileField('email', e.target.value)} type="email" />
+                  <FormInput label="Support Email" value={profile.supportEmail} onChange={e => updateProfileField('supportEmail', e.target.value)} type="email" />
+                  <FormInput label="Phone Number" value={profile.phone} onChange={e => updateProfileField('phone', e.target.value)} type="tel" />
+                  <FormInput label="Website" value={profile.website} onChange={e => updateProfileField('website', e.target.value)} />
+                </FormSection>
+                <FormSection title="Location Details" icon={<MapPin size={16} />}>
+                  <FormRow>
+                    <FormInput label="Street Address" value={profile.address} onChange={e => updateProfileField('address', e.target.value)} />
+                  </FormRow>
+                  <FormInput label="City" value={profile.city} onChange={e => updateProfileField('city', e.target.value)} />
+                  <FormInput label="Country" value={profile.country} onChange={e => updateProfileField('country', e.target.value)} />
+                </FormSection>
                 <div className="border-t border-slate-50 pt-6">
                   <h4 className="text-xs font-bold uppercase text-slate-400 tracking-wider mb-2">Default Currency</h4>
                   <p className="text-xs text-slate-500 mb-6">Currency pre-selected when creating billboards, expenses, and ad-hoc invoices. Existing rows keep the currency they were saved with; dashboards always split totals per currency.</p>
                   <div className="max-w-xs">
-                    <MinimalSelect
+                    <FormSelect
                       label="Default Currency"
                       value={profile.defaultCurrency || 'USD'}
                       onChange={e => updateProfileField('defaultCurrency', e.target.value as CompanyProfile['defaultCurrency'])}
@@ -788,12 +756,12 @@ export const Settings: React.FC = () => {
         }
       >
         <form id="invite-user-form" onSubmit={handleInviteUser} className="space-y-6">
-          <div className="grid grid-cols-2 gap-6">
-            <MinimalInput label="First Name" value={inviteForm.firstName} onChange={(e: any) => { setInviteForm({...inviteForm, firstName: e.target.value}); setInviteError(''); }} required />
-            <MinimalInput label="Last Name" value={inviteForm.lastName} onChange={(e: any) => { setInviteForm({...inviteForm, lastName: e.target.value}); setInviteError(''); }} required />
-          </div>
-          <MinimalInput label="Email Address" type="email" value={inviteForm.email} onChange={(e: any) => { setInviteForm({...inviteForm, email: e.target.value}); setInviteError(''); }} required />
-          <MinimalSelect label="Role" value={inviteForm.role} onChange={(e: any) => setInviteForm({...inviteForm, role: e.target.value})} options={[{value: 'Admin', label: 'Admin (Full Access)'},{value: 'Manager', label: 'Manager (No Settings)'},{value: 'Staff', label: 'Staff (Read Only)'}]} />
+          <FormSection title="Invite Details">
+            <FormInput label="First Name" value={inviteForm.firstName} onChange={(e: any) => { setInviteForm({...inviteForm, firstName: e.target.value}); setInviteError(''); }} required />
+            <FormInput label="Last Name" value={inviteForm.lastName} onChange={(e: any) => { setInviteForm({...inviteForm, lastName: e.target.value}); setInviteError(''); }} required />
+            <FormInput label="Email Address" type="email" value={inviteForm.email} onChange={(e: any) => { setInviteForm({...inviteForm, email: e.target.value}); setInviteError(''); }} required />
+            <FormSelect label="Role" value={inviteForm.role} onChange={(e: any) => setInviteForm({...inviteForm, role: e.target.value})} options={[{value: 'Admin', label: 'Admin (Full Access)'},{value: 'Manager', label: 'Manager (No Settings)'},{value: 'Staff', label: 'Staff (Read Only)'}]} />
+          </FormSection>
           {inviteError && <p className="text-red-500 text-xs font-bold bg-red-50 border border-red-100 rounded-lg px-3 py-2">{inviteError}</p>}
         </form>
       </AccessibleModal>
@@ -818,15 +786,13 @@ export const Settings: React.FC = () => {
       >
         {editingUser && (
           <form id="edit-user-form" onSubmit={handleEditUser} className="space-y-6">
-            <div className="grid grid-cols-2 gap-6">
-              <MinimalInput label="First Name" value={editingUser.firstName} onChange={(e: any) => setEditingUser({...editingUser, firstName: e.target.value})} required />
-              <MinimalInput label="Last Name" value={editingUser.lastName} onChange={(e: any) => setEditingUser({...editingUser, lastName: e.target.value})} required />
-            </div>
-            <MinimalInput label="Email Address" type="email" value={editingUser.email} onChange={(e: any) => setEditingUser({...editingUser, email: e.target.value})} required />
-            <div className="grid grid-cols-2 gap-6">
-              <MinimalSelect label="Role" value={editingUser.role} onChange={(e: any) => setEditingUser({...editingUser, role: e.target.value as any})} options={[{value: 'Admin', label: 'Admin (Full Access)'},{value: 'Manager', label: 'Manager (No Settings)'},{value: 'Staff', label: 'Staff (Read Only)'}]} />
-              <MinimalSelect label="Status" value={editingUser.status || 'Active'} onChange={(e: any) => setEditingUser({...editingUser, status: e.target.value as any})} options={[{value: 'Active', label: 'Active'},{value: 'Pending', label: 'Pending Approval'},{value: 'Denied', label: 'Denied / Suspended'}]} />
-            </div>
+            <FormSection title="User Details">
+              <FormInput label="First Name" value={editingUser.firstName} onChange={(e: any) => setEditingUser({...editingUser, firstName: e.target.value})} required />
+              <FormInput label="Last Name" value={editingUser.lastName} onChange={(e: any) => setEditingUser({...editingUser, lastName: e.target.value})} required />
+              <FormInput label="Email Address" type="email" value={editingUser.email} onChange={(e: any) => setEditingUser({...editingUser, email: e.target.value})} required />
+              <FormSelect label="Role" value={editingUser.role} onChange={(e: any) => setEditingUser({...editingUser, role: e.target.value as any})} options={[{value: 'Admin', label: 'Admin (Full Access)'},{value: 'Manager', label: 'Manager (No Settings)'},{value: 'Staff', label: 'Staff (Read Only)'}]} />
+              <FormSelect label="Status" value={editingUser.status || 'Active'} onChange={(e: any) => setEditingUser({...editingUser, status: e.target.value as any})} options={[{value: 'Active', label: 'Active'},{value: 'Pending', label: 'Pending Approval'},{value: 'Denied', label: 'Denied / Suspended'}]} />
+            </FormSection>
             {!!currentUser && currentUser.id === editingUser.id && editingUser.role !== 'Admin' && (
               <p className="text-xs text-amber-600 font-semibold bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">You're changing your own role away from Admin. You may lose access to this page after saving.</p>
             )}

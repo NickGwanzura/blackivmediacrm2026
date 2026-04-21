@@ -7,22 +7,10 @@ import { emailInvoice, emailStatement } from '../services/emailService';
 import { Client, Invoice } from '../types';
 import { DollarSign, FileText, Download, CheckCircle, AlertCircle, Search, CreditCard, Check, Filter, Hash, Wallet, Building, Clock, Calendar, Mail, Loader2 } from 'lucide-react';
 import { AccessibleModal, ModalButton } from './ui/AccessibleModal';
+import { FormInput, FormSelect, FormDate, FormSection } from './ui/Form';
 import { formatCurrency, formatCurrencyTotals } from '../utils/sanitizers';
 
-const MinimalInput = ({ label, value, onChange, type = "text", required = false, placeholder = "", icon: Icon }: any) => (
-    <div className="group relative pt-6">
-      <div className="absolute top-9 left-0 text-slate-400">{Icon && <Icon size={18} />}</div>
-      <input type={type} required={required} value={value} onChange={onChange} placeholder={placeholder || " "} className={`peer w-full py-2.5 border-b border-slate-200 bg-transparent text-slate-800 focus:border-slate-800 focus:ring-0 outline-none transition-all font-medium placeholder-transparent focus:placeholder-slate-300 ${Icon ? 'pl-8' : 'px-0'}`} />
-      <label className={`absolute left-0 top-1 text-xs text-slate-400 font-medium transition-all uppercase tracking-wide peer-placeholder-shown:text-sm peer-placeholder-shown:text-slate-400 peer-placeholder-shown:top-9 peer-focus:top-1 peer-focus:text-xs peer-focus:text-slate-800 pointer-events-none ${Icon ? 'peer-placeholder-shown:left-8 peer-focus:left-0' : ''}`}>{label}</label>
-    </div>
-);
-const MinimalSelect = ({ label, value, onChange, options, icon: Icon }: any) => (
-  <div className="group relative pt-6">
-    <div className="absolute top-9 left-0 text-slate-400 pointer-events-none z-10">{Icon && <Icon size={18} />}</div>
-    <select value={value} onChange={onChange} className={`peer w-full py-2.5 border-b border-slate-200 bg-transparent text-slate-800 focus:border-slate-800 focus:ring-0 outline-none transition-all font-medium appearance-none cursor-pointer ${Icon ? 'pl-8' : 'px-0'}`} >{options.map((opt: any) => (<option key={opt.value} value={opt.value}>{opt.label}</option>))}</select>
-    <label className={`absolute left-0 top-1 text-xs text-slate-400 font-medium uppercase tracking-wide transition-all ${Icon ? 'left-0' : ''}`}>{label}</label>
-  </div>
-);
+
 
 export const Payments: React.FC = () => {
     const toast = useToast();
@@ -208,11 +196,11 @@ export const Payments: React.FC = () => {
                             <h2 className="text-4xl font-extrabold text-slate-900 tracking-tighter">{formatCurrency(selectedInvoice.total, selectedInvoice.currency)}</h2>
                             <p className="text-sm font-medium text-slate-500 mt-2">{getClientName(selectedInvoice.clientId)}</p>
                         </div>
-                        <div className="space-y-6">
-                            <MinimalInput label="Payment Date" type="date" value={paymentDetails.date} onChange={(e: any) => setPaymentDetails({...paymentDetails, date: e.target.value})} icon={Calendar} required />
-                            <MinimalSelect label="Payment Method" value={paymentDetails.method} onChange={(e: any) => setPaymentDetails({...paymentDetails, method: e.target.value})} icon={Wallet} options={[{value: 'Bank Transfer', label: 'Bank Transfer'},{value: 'Cash', label: 'Cash'},{value: 'EcoCash', label: 'EcoCash Mobile Money'},{value: 'Other', label: 'Other'}]} />
-                            <MinimalInput label="Reference Number / Proof" value={paymentDetails.reference} onChange={(e: any) => setPaymentDetails({...paymentDetails, reference: e.target.value})} icon={Hash} placeholder="e.g. POP-12345" required />
-                        </div>
+                        <FormSection title="Payment Details">
+                            <FormDate label="Payment Date" value={paymentDetails.date} onChange={(e: any) => setPaymentDetails({...paymentDetails, date: e.target.value})} required />
+                            <FormSelect label="Payment Method" value={paymentDetails.method} onChange={(e: any) => setPaymentDetails({...paymentDetails, method: e.target.value})} options={[{value: 'Bank Transfer', label: 'Bank Transfer'},{value: 'Cash', label: 'Cash'},{value: 'EcoCash', label: 'EcoCash Mobile Money'},{value: 'Other', label: 'Other'}]} />
+                            <FormInput label="Reference Number / Proof" value={paymentDetails.reference} onChange={(e: any) => setPaymentDetails({...paymentDetails, reference: e.target.value})} placeholder="e.g. POP-12345" required />
+                        </FormSection>
                     </div>
                 )}
             </AccessibleModal>
