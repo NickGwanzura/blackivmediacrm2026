@@ -15,15 +15,32 @@ import {
 } from '../services/mockData';
 import { getCurrentUser } from '../services/authService';
 import { BillboardType } from '../types';
+import { formatCurrency, formatCurrencyTotals, sumByCurrency } from '../utils/sanitizers';
 
-const fmt = (n: number) => {
-  if (!Number.isFinite(n)) return '$0';
-  return `$${Math.round(n).toLocaleString()}`;
-};
+// Single-currency formatter for charts/tooltips where all points share one
+// denomination. Defaults to USD since financial trends remain USD-only in
+// the legacy series; cards that handle mixed currencies use
+// formatCurrencyTotals instead.
+const fmt = (n: number) => formatCurrency(Math.round(n), 'USD');
 
 const pct = (num: number, denom: number): number => {
   if (!Number.isFinite(num) || !Number.isFinite(denom) || denom <= 0) return 0;
   return Math.round((num / denom) * 100);
+};
+
+// Combine two { USD: n, ZWG: n } maps element-wise.
+const mergeTotals = (a: Record<string, number>, b: Record<string, number>): Record<string, number> => {
+  const out: Record<string, number> = { ...a };
+  for (const [k, v] of Object.entries(b)) out[k] = (out[k] || 0) + v;
+  return out;
+};
+
+// a - b per currency. Missing currencies on either side default to 0.
+const subtractTotals = (a: Record<string, number>, b: Record<string, number>): Record<string, number> => {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  const out: Record<string, number> = {};
+  for (const k of keys) out[k] = (a[k] || 0) - (b[k] || 0);
+  return out;
 };
 
 const greeting = () => {
@@ -51,25 +68,42 @@ export const Dashboard: React.FC = () => {
   const maintenanceNeeds = maintenanceLogs.filter(l => l.status === 'Needs Attention');
 
   // --- Financials ---
-  const totalRevenue = invoices
-    .filter(i => i.type === 'Invoice')
-    .reduce((a, i) => a + (i.total || 0), 0);
+  // Dual-currency: revenue/expense/profit are reported PER CURRENCY. Mixed
+  // currencies cannot be summed into a single scalar, so KPI cards render a
+  // "USD X · ZWG Y" string via formatCurrencyTotals and every per-currency
+  // aggregation is kept as { USD: n, ZWG: n }.
+  const invoiceRows = invoices.filter(i => i.type === 'Invoice');
+  const receiptRows = invoices.filter(i => i.type === 'Receipt');
+  const outstandingRows = invoiceRows.filter(i => i.status === 'Pending' || i.status === 'Overdue');
 
-  const collectedRevenue = invoices
-    .filter(i => i.type === 'Receipt')
-    .reduce((a, i) => a + (i.total || 0), 0);
+  const revenueByCurrency     = sumByCurrency(invoiceRows,    i => i.total, i => i.currency);
+  const collectedByCurrency   = sumByCurrency(receiptRows,    i => i.total, i => i.currency);
+  const outstandingByCurrency = sumByCurrency(outstandingRows, i => i.total, i => i.currency);
 
-  const outstandingAmount = invoices
-    .filter(i => i.type === 'Invoice' && (i.status === 'Pending' || i.status === 'Overdue'))
-    .reduce((a, i) => a + (i.total || 0), 0);
+  const opsExpensesByCurrency   = sumByCurrency(expenses,      e => e.amount,    e => e.currency);
+  const printingCostByCurrency  = sumByCurrency(printingJobs,  p => p.totalCost, p => (p as any).currency);
+  const expenditureByCurrency = mergeTotals(opsExpensesByCurrency, printingCostByCurrency);
 
-  const expensesTotal = expenses.reduce((a, e) => a + (e.amount || 0), 0);
-  const printingTotal = printingJobs.reduce((a, p) => a + (p.totalCost || 0), 0);
-  const totalExpenditure = expensesTotal + printingTotal;
+  const profitByCurrency = subtractTotals(revenueByCurrency, expenditureByCurrency);
 
-  const netProfit = totalRevenue - totalExpenditure;
-  const profitMargin = pct(netProfit, totalRevenue);
-  const profitPositive = netProfit >= 0;
+  // Per-currency margin (profit ÷ revenue) is only meaningful within one
+  // denomination. Pick the currency with the most revenue for the headline
+  // margin chip; this stays useful in USD-only deployments while being
+  // honest about which currency drives the headline number.
+  const primaryCurrency =
+    Object.entries(revenueByCurrency).sort((a, b) => b[1] - a[1])[0]?.[0]
+    || Object.keys(profitByCurrency)[0]
+    || 'USD';
+  const primaryRevenue = revenueByCurrency[primaryCurrency] || 0;
+  const primaryProfit = profitByCurrency[primaryCurrency] || 0;
+  const profitMargin = pct(primaryProfit, primaryRevenue);
+  const profitPositive = Object.values(profitByCurrency).every(v => v >= 0);
+
+  // Single-currency scalars kept for the financial-trends chart (revenue vs.
+  // expenses over time). The trend series collapses to USD for now because
+  // historical data has no currency column; once ZWG history accrues the
+  // chart can be duplicated or overlaid by currency.
+  const outstandingAmount = Object.values(outstandingByCurrency).reduce((a, v) => a + v, 0);
 
   // --- Fleet / Occupancy ---
   const ledBillboards = billboards.filter(b => b.type === BillboardType.LED);
@@ -105,49 +139,70 @@ export const Dashboard: React.FC = () => {
   const activeClients = clients.filter(c => c.status === 'Active').length;
 
   // --- Revenue by Town ---
+  // Bars are keyed by (town, currency) so "Harare (USD)" and "Harare (ZWG)"
+  // appear as separate entries. Recharts can't render two currencies in one
+  // bar, and converting with an exchange rate would drift — splitting keeps
+  // totals comparable within each denomination.
   const revenueByTownData = useMemo(() => {
-    const byTown = new Map<string, number>();
+    const byTownCurrency = new Map<string, { name: string; value: number; currency: string }>();
     for (const b of billboards) {
-      const townRevenue = contracts
-        .filter(c => c.billboardId === b.id && c.status === 'Active')
-        .reduce((s, c) => s + (c.totalContractValue || 0), 0);
-      byTown.set(b.town, (byTown.get(b.town) || 0) + townRevenue);
+      const activeContracts = contracts.filter(c => c.billboardId === b.id && c.status === 'Active');
+      for (const c of activeContracts) {
+        const code = (c.currency || 'USD').toUpperCase();
+        const key = `${b.town}::${code}`;
+        const existing = byTownCurrency.get(key);
+        const value = (existing?.value || 0) + (c.totalContractValue || 0);
+        byTownCurrency.set(key, { name: `${b.town} (${code})`, value, currency: code });
+      }
     }
-    return Array.from(byTown.entries())
-      .map(([name, value]) => ({ name, value }))
+    return Array.from(byTownCurrency.values())
       .filter(x => x.value > 0)
       .sort((a, b) => b.value - a.value)
       .slice(0, 5);
   }, [billboards, contracts]);
 
   // --- Top Clients (by billed) ---
-  const topClientsData = useMemo(() => (
-    clients
-      .map(c => ({
-        name: c.companyName,
-        value: invoices
-          .filter(i => i.clientId === c.id && i.type === 'Invoice')
-          .reduce((s, i) => s + (i.total || 0), 0),
-      }))
-      .filter(x => x.value > 0)
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 5)
-  ), [clients, invoices]);
+  // Same split: one entry per (client, currency). A client with both USD
+  // and ZWG invoices shows up twice so neither total is distorted.
+  const topClientsData = useMemo(() => {
+    const entries: { name: string; value: number; currency: string }[] = [];
+    for (const c of clients) {
+      const byCurrency = sumByCurrency(
+        invoices.filter(i => i.clientId === c.id && i.type === 'Invoice'),
+        i => i.total,
+        i => i.currency,
+      );
+      for (const [code, value] of Object.entries(byCurrency)) {
+        if (value > 0) entries.push({ name: `${c.companyName} (${code})`, value, currency: code });
+      }
+    }
+    return entries.sort((a, b) => b.value - a.value).slice(0, 5);
+  }, [clients, invoices]);
 
   // --- Expense Breakdown ---
+  // Percentages only make sense within a single currency, so the pie chart
+  // renders the *primary* currency's expense categories. A chip below the
+  // title names which currency is shown, and the non-primary totals appear
+  // in the KPI row above so nothing is hidden.
   const expenseBreakdown = useMemo(() => {
     const byCategory = new Map<string, number>();
     for (const e of expenses) {
+      if (((e.currency || 'USD').toUpperCase()) !== primaryCurrency) continue;
       byCategory.set(e.category, (byCategory.get(e.category) || 0) + (e.amount || 0));
     }
-    if (printingTotal > 0) {
-      byCategory.set('Printing', (byCategory.get('Printing') || 0) + printingTotal);
+    const printingInPrimary = printingJobs
+      .filter(p => ((p as any).currency || 'USD').toUpperCase() === primaryCurrency)
+      .reduce((a, p) => a + (p.totalCost || 0), 0);
+    if (printingInPrimary > 0) {
+      byCategory.set('Printing', (byCategory.get('Printing') || 0) + printingInPrimary);
     }
     return Array.from(byCategory.entries())
       .map(([name, value]) => ({ name, value }))
       .filter(x => x.value > 0)
       .sort((a, b) => b.value - a.value);
-  }, [expenses, printingTotal]);
+  }, [expenses, printingJobs, primaryCurrency]);
+
+  const primaryExpenditure = expenditureByCurrency[primaryCurrency] || 0;
 
   const user = getCurrentUser();
   const today = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
@@ -188,28 +243,31 @@ export const Dashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Primary KPIs — Financial */}
+        {/* Primary KPIs — Financial
+            Dual currency: each KPI renders "USD X · ZWG Y". Margin is the
+            primary-currency margin only (mixing denominators would be
+            misleading). */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           <KpiCard
             label="Total Revenue"
-            value={fmt(totalRevenue)}
+            value={formatCurrencyTotals(revenueByCurrency)}
             icon={DollarSign}
             tone="dark"
-            sub={`${fmt(collectedRevenue)} collected`}
+            sub={`${formatCurrencyTotals(collectedByCurrency)} collected`}
           />
           <KpiCard
             label="Expenditure"
-            value={fmt(totalExpenditure)}
+            value={formatCurrencyTotals(expenditureByCurrency)}
             icon={Wallet}
             tone="amber"
-            sub={`${fmt(expensesTotal)} ops · ${fmt(printingTotal)} print`}
+            sub={`${formatCurrencyTotals(opsExpensesByCurrency)} ops · ${formatCurrencyTotals(printingCostByCurrency)} print`}
           />
           <KpiCard
             label="Net Profit"
-            value={fmt(netProfit)}
+            value={formatCurrencyTotals(profitByCurrency)}
             icon={profitPositive ? TrendingUp : TrendingDown}
             tone={profitPositive ? 'emerald' : 'rose'}
-            sub={`${profitMargin}% margin`}
+            sub={`${profitMargin}% ${primaryCurrency} margin`}
           />
           <KpiCard
             label="Occupancy"
@@ -227,7 +285,7 @@ export const Dashboard: React.FC = () => {
           <MiniStat
             label="Overdue"
             value={overdueInvoices.length}
-            sub={fmt(overdueInvoices.reduce((a, i) => a + (i.total || 0), 0))}
+            sub={formatCurrencyTotals(sumByCurrency(overdueInvoices, i => i.total, i => i.currency))}
             icon={AlertTriangle}
             tone="rose"
           />
@@ -280,11 +338,11 @@ export const Dashboard: React.FC = () => {
             <div className="flex items-center justify-between mb-6">
               <div>
                 <h3 className="text-lg font-bold text-slate-900">Expenditure Breakdown</h3>
-                <p className="text-xs text-slate-500 font-medium mt-0.5">By category (all time)</p>
+                <p className="text-xs text-slate-500 font-medium mt-0.5">By category, {primaryCurrency} only · full multi-currency totals in the KPI row</p>
               </div>
               <div className="text-right">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Total</p>
-                <p className="text-lg font-extrabold text-slate-900">{fmt(totalExpenditure)}</p>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">{primaryCurrency} Total</p>
+                <p className="text-lg font-extrabold text-slate-900">{formatCurrency(primaryExpenditure, primaryCurrency)}</p>
               </div>
             </div>
             {expenseBreakdown.length === 0 ? (
@@ -304,20 +362,20 @@ export const Dashboard: React.FC = () => {
                           <Cell key={i} fill={EXPENSE_COLORS[i % EXPENSE_COLORS.length]} />
                         ))}
                       </Pie>
-                      <Tooltip formatter={(v: number) => fmt(v)} contentStyle={{ borderRadius: 12, border: '1px solid #e4e4e7', fontSize: 12 }} />
+                      <Tooltip formatter={(v: number) => formatCurrency(v, primaryCurrency)} contentStyle={{ borderRadius: 12, border: '1px solid #e4e4e7', fontSize: 12 }} />
                     </PieChart>
                   </ResponsiveContainer>
                 </div>
                 <div className="flex-1 min-w-0 space-y-2">
                   {expenseBreakdown.map((row, i) => {
-                    const share = pct(row.value, totalExpenditure);
+                    const share = pct(row.value, primaryExpenditure);
                     return (
                       <div key={row.name} className="flex items-center gap-3">
                         <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: EXPENSE_COLORS[i % EXPENSE_COLORS.length] }} />
                         <div className="flex-1 min-w-0">
                           <div className="flex justify-between items-baseline text-sm mb-1">
                             <span className="font-bold text-slate-800 truncate">{row.name}</span>
-                            <span className="font-bold text-slate-900 ml-2">{fmt(row.value)}</span>
+                            <span className="font-bold text-slate-900 ml-2">{formatCurrency(row.value, primaryCurrency)}</span>
                           </div>
                           <div className="h-1 rounded-full bg-slate-100 overflow-hidden">
                             <div
@@ -345,8 +403,8 @@ export const Dashboard: React.FC = () => {
                   <BarChart data={revenueByTownData} layout="vertical" margin={{ left: 0, right: 20 }}>
                     <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f4f4f5" />
                     <XAxis type="number" hide />
-                    <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fill: '#52525b', fontSize: 12, fontWeight: 600 }} width={100} />
-                    <Tooltip formatter={(v: number) => fmt(v)} cursor={{ fill: 'transparent' }} contentStyle={{ borderRadius: 12, border: '1px solid #e4e4e7' }} />
+                    <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fill: '#52525b', fontSize: 12, fontWeight: 600 }} width={120} />
+                    <Tooltip formatter={(v: number, _n, p: any) => formatCurrency(v, p?.payload?.currency)} cursor={{ fill: 'transparent' }} contentStyle={{ borderRadius: 12, border: '1px solid #e4e4e7' }} />
                     <Bar dataKey="value" radius={[0, 6, 6, 0]} barSize={20}>
                       {revenueByTownData.map((_, i) => (
                         <Cell key={i} fill={['#18181b', '#3f3f46', '#71717a', '#a1a1aa', '#d4d4d8'][i % 5]} />
@@ -409,7 +467,7 @@ export const Dashboard: React.FC = () => {
                         <p className="text-xs font-bold text-slate-800 truncate">{bill.clientName}</p>
                         <p className="text-[10px] text-slate-400 font-medium mt-0.5">Due: {bill.date}</p>
                       </div>
-                      <p className="text-xs font-bold text-orange-600 bg-orange-50 px-2 py-1 rounded-lg shrink-0 ml-2">{fmt(bill.amount)}</p>
+                      <p className="text-xs font-bold text-orange-600 bg-orange-50 px-2 py-1 rounded-lg shrink-0 ml-2">{formatCurrencyTotals(bill.amountByCurrency)}</p>
                     </div>
                   ))}
                 </div>
@@ -453,7 +511,7 @@ export const Dashboard: React.FC = () => {
                     icon={AlertTriangle}
                     label="Overdue Payment"
                     title={getClientName(inv.clientId)}
-                    sub={`${fmt(inv.total || 0)} · #${inv.id}`}
+                    sub={`${formatCurrency(inv.total || 0, inv.currency)} · #${inv.id}`}
                   />
                 ))}
               </>
@@ -471,8 +529,8 @@ export const Dashboard: React.FC = () => {
                 <BarChart data={topClientsData} layout="vertical" margin={{ left: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f4f4f5" />
                   <XAxis type="number" hide />
-                  <YAxis dataKey="name" type="category" width={90} axisLine={false} tickLine={false} tick={{ fill: '#71717a', fontSize: 11, fontWeight: 600 }} />
-                  <Tooltip formatter={(v: number) => fmt(v)} cursor={{ fill: 'transparent' }} contentStyle={{ borderRadius: 12, border: '1px solid #e4e4e7' }} />
+                  <YAxis dataKey="name" type="category" width={110} axisLine={false} tickLine={false} tick={{ fill: '#71717a', fontSize: 11, fontWeight: 600 }} />
+                  <Tooltip formatter={(v: number, _n, p: any) => formatCurrency(v, p?.payload?.currency)} cursor={{ fill: 'transparent' }} contentStyle={{ borderRadius: 12, border: '1px solid #e4e4e7' }} />
                   <Bar dataKey="value" fill="#18181b" radius={[0, 6, 6, 0]} barSize={16}>
                     {topClientsData.map((_, i) => (
                       <Cell key={i} fill={['#18181b', '#27272a', '#3f3f46', '#52525b', '#71717a'][i % 5]} />

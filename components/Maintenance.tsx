@@ -1,9 +1,10 @@
 
 import React, { useState } from 'react';
-import { getBillboards, getMaintenanceLogs, addMaintenanceLog, runMaintenanceScheduler } from '../services/mockData';
+import { getBillboards, getMaintenanceLogs, addMaintenanceLog, runMaintenanceScheduler, getDefaultCurrency } from '../services/mockData';
 import { useToast } from './Toast';
 import { generateMaintenanceReportPDF } from '../services/pdfGenerator';
-import { MaintenanceLog } from '../types';
+import { MaintenanceLog, Currency, CURRENCIES } from '../types';
+import { formatCurrency } from '../utils/sanitizers';
 import { Wrench, CheckCircle, AlertTriangle, XCircle, Search, Plus, Calendar, Save, History, FileText, RefreshCw, Download } from 'lucide-react';
 import { AccessibleModal, ModalButton } from './ui/AccessibleModal';
 
@@ -31,7 +32,7 @@ export const Maintenance: React.FC = () => {
     const billboards = getBillboards();
     
     const [newLog, setNewLog] = useState<Partial<MaintenanceLog>>({
-        billboardId: '', date: new Date().toISOString().split('T')[0], type: 'Visual Check', technician: '', notes: '', status: 'Pass', cost: 0
+        billboardId: '', date: new Date().toISOString().split('T')[0], type: 'Visual Check', technician: '', notes: '', status: 'Pass', cost: 0, currency: getDefaultCurrency()
     });
 
     const getStatusInfo = (billboardId: string) => {
@@ -70,13 +71,14 @@ export const Maintenance: React.FC = () => {
             notes: newLog.notes || '',
             status: newLog.status as any,
             nextDueDate: nextDue.toISOString().split('T')[0],
-            cost: newLog.cost
+            cost: newLog.cost,
+            currency: newLog.currency || getDefaultCurrency()
         };
-        
+
         addMaintenanceLog(log);
         setLogs(getMaintenanceLogs());
         setIsLogModalOpen(false);
-        setNewLog({ billboardId: '', date: new Date().toISOString().split('T')[0], type: 'Visual Check', technician: '', notes: '', status: 'Pass', cost: 0 });
+        setNewLog({ billboardId: '', date: new Date().toISOString().split('T')[0], type: 'Visual Check', technician: '', notes: '', status: 'Pass', cost: 0, currency: getDefaultCurrency() });
         toast.success("Maintenance log saved.");
     };
 
@@ -222,7 +224,10 @@ export const Maintenance: React.FC = () => {
                     <MinimalInput label="Notes / Observations" value={newLog.notes} onChange={(e: any) => setNewLog({...newLog, notes: e.target.value})} />
                     <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
                         <p className="text-xs text-slate-400 font-bold uppercase mb-2">Optional Cost Tracking</p>
-                        <MinimalInput label="Cost Incurred ($)" type="number" value={newLog.cost} onChange={(e: any) => setNewLog({...newLog, cost: Number(e.target.value)})} />
+                        <div className="grid grid-cols-2 gap-6">
+                            <MinimalInput label={`Cost Incurred (${newLog.currency || getDefaultCurrency()})`} type="number" value={newLog.cost} onChange={(e: any) => setNewLog({...newLog, cost: Number(e.target.value)})} />
+                            <MinimalSelect label="Currency" value={newLog.currency || getDefaultCurrency()} onChange={(e: any) => setNewLog({...newLog, currency: e.target.value as Currency})} options={CURRENCIES.map(c => ({ value: c, label: c }))} />
+                        </div>
                     </div>
                 </form>
             </AccessibleModal>

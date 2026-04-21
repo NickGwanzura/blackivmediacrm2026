@@ -21,6 +21,7 @@ const STATEMENTS = [
      coordinates     JSONB,
      image_url       TEXT,
      visibility      TEXT,
+     currency        TEXT NOT NULL DEFAULT 'USD',
      side_a_rate     NUMERIC,
      side_b_rate     NUMERIC,
      side_a_status   TEXT,
@@ -36,6 +37,16 @@ const STATEMENTS = [
   // existing billboards tables are missing them.
   `ALTER TABLE billboards ADD COLUMN IF NOT EXISTS side_a_client_id TEXT`,
   `ALTER TABLE billboards ADD COLUMN IF NOT EXISTS side_b_client_id TEXT`,
+
+  // ---- Dual-currency rollout ----
+  // Every money-bearing table gets a currency column. Existing rows default
+  // to 'USD' since all legacy inventory was billed in USD prior to this
+  // change — that keeps historical totals correct without a backfill pass.
+  `ALTER TABLE billboards       ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'USD'`,
+  `ALTER TABLE contracts        ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'USD'`,
+  `ALTER TABLE invoices         ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'USD'`,
+  `ALTER TABLE expenses         ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'USD'`,
+  `ALTER TABLE maintenance_logs ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'USD'`,
 
   // ---- users ----
   // Ensure the users relational mirror has the auth columns we need.

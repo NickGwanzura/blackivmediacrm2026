@@ -19,6 +19,9 @@ CREATE TABLE IF NOT EXISTS billboards (
   coordinates     JSONB,
   image_url       TEXT,
   visibility      TEXT,
+  -- ISO 4217 currency code that denominates side_a_rate, side_b_rate, and
+  -- rate_per_slot. Defaults to 'USD' for rows that predate dual currency.
+  currency        TEXT NOT NULL DEFAULT 'USD',
   side_a_rate     NUMERIC,
   side_b_rate     NUMERIC,
   side_a_status   TEXT,
@@ -48,6 +51,10 @@ CREATE TABLE IF NOT EXISTS contracts (
   billboard_id          TEXT,
   start_date            DATE,
   end_date              DATE,
+  -- Copied from billboards.currency at contract creation so the contract
+  -- stays interpretable even if the underlying billboard is later repriced
+  -- in a different currency.
+  currency              TEXT NOT NULL DEFAULT 'USD',
   monthly_rate          NUMERIC,
   installation_cost     NUMERIC,
   printing_cost         NUMERIC,
@@ -65,6 +72,9 @@ CREATE TABLE IF NOT EXISTS invoices (
   client_id          TEXT,
   contract_id        TEXT,
   date               DATE,
+  -- Denomination of subtotal / vat_amount / total. Receipts copy this from
+  -- the paid invoice so payment ledgers never mix currencies.
+  currency           TEXT NOT NULL DEFAULT 'USD',
   items              JSONB,
   subtotal           NUMERIC,
   vat_amount         NUMERIC,
@@ -81,6 +91,9 @@ CREATE TABLE IF NOT EXISTS expenses (
   category     TEXT,
   description  TEXT,
   amount       NUMERIC,
+  -- Expenses can be paid in either currency (power bills in ZWG, fuel in
+  -- USD, etc.), so currency is per-row rather than a company-wide flag.
+  currency     TEXT NOT NULL DEFAULT 'USD',
   date         DATE,
   reference    TEXT,
   created_at   TIMESTAMPTZ DEFAULT NOW()
@@ -118,6 +131,7 @@ CREATE TABLE IF NOT EXISTS maintenance_logs (
   status          TEXT,
   next_due_date   DATE,
   cost            NUMERIC,
+  currency        TEXT NOT NULL DEFAULT 'USD',
   created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 

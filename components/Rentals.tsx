@@ -1,13 +1,14 @@
 
 import React, { useState, useEffect } from 'react';
-import { getContracts, getBillboards, addContract, addInvoice, mockClients, deleteContract } from '../services/mockData';
+import { getContracts, getBillboards, addContract, addInvoice, mockClients, deleteContract, getDefaultCurrency } from '../services/mockData';
 import { useToast } from './Toast';
 import { generateContractPDF, generateMasterContractPDF, generateActiveRentalsPDF } from '../services/pdfGenerator';
 import { emailContract } from '../services/emailService';
 import { generateRentalProposal } from '../services/aiService';
-import { Contract, BillboardType, VAT_RATE, Invoice } from '../types';
+import { Contract, BillboardType, VAT_RATE, Invoice, Currency } from '../types';
 import { FileText, Calendar, Download, Eye, Plus, Wand2, RefreshCw, CheckCircle, Trash2, Sparkles, Layers, ShoppingCart, MinusCircle, FileDown, Mail, Loader2, Receipt } from 'lucide-react';
 import { AccessibleModal, ModalButton } from './ui/AccessibleModal';
+import { formatCurrency } from '../utils/sanitizers';
 
 const MinimalInput = ({ label, value, onChange, type = "text", required = false, disabled = false }: any) => {
   const isDate = type === 'date';
@@ -57,6 +58,7 @@ interface BatchItem {
     monthlyRate: number;
     installationCost: number;
     printingCost: number;
+    currency: Currency;
     details: string;
     tempId: number; // For identifying in cart
 }
@@ -78,17 +80,21 @@ export const Rentals: React.FC = () => {
 
   // Shared form state
   const [formData, setFormData] = useState({
-    clientId: '', 
-    startDate: '', 
-    endDate: '', 
+    clientId: '',
+    startDate: '',
+    endDate: '',
     hasVat: true,
-    // Single mode specific (or current batch item specific)
-    billboardId: '', 
-    side: 'A' as 'A' | 'B' | 'Both', 
-    slotNumber: 1, 
-    monthlyRate: 0, 
-    installationCost: 0, 
-    printingCost: 0
+    // Single mode specific (or current batch item specific).
+    // Currency is inherited from the selected billboard and snapshotted onto
+    // the contract at save time so later repricing of the billboard doesn't
+    // silently change historical contract denominations.
+    billboardId: '',
+    side: 'A' as 'A' | 'B' | 'Both',
+    slotNumber: 1,
+    monthlyRate: 0,
+    installationCost: 0,
+    printingCost: 0,
+    currency: getDefaultCurrency() as Currency,
   });
 
   useEffect(() => {
@@ -145,19 +151,20 @@ export const Rentals: React.FC = () => {
 
   // Auto-set rate when billboard/side selected
   useEffect(() => {
+    const inheritedCurrency = (selectedBillboard?.currency || getDefaultCurrency()) as Currency;
     if (selectedBillboard?.type === BillboardType.Static) {
         // Simple logic: default to A if available, else B, else none
         const aFree = isSideAvailable('A', selectedBillboard);
         const bFree = isSideAvailable('B', selectedBillboard);
-        
+
         let autoSide: 'A' | 'B' | 'Both' = 'A';
         let rate = 0;
 
-        if (aFree) { autoSide = 'A'; rate = selectedBillboard.sideARate || 0; } 
-        else if (bFree) { autoSide = 'B'; rate = selectedBillboard.sideBRate || 0; } 
+        if (aFree) { autoSide = 'A'; rate = selectedBillboard.sideARate || 0; }
+        else if (bFree) { autoSide = 'B'; rate = selectedBillboard.sideBRate || 0; }
         else { rate = 0; } // All occupied or in cart
 
-        setFormData(prev => ({ ...prev, side: autoSide, monthlyRate: rate }));
+        setFormData(prev => ({ ...prev, side: autoSide, monthlyRate: rate, currency: inheritedCurrency }));
     } else if (selectedBillboard?.type === BillboardType.LED) {
         // Intelligent Slot Selection
         const usedSlots = batchItems
@@ -178,10 +185,11 @@ export const Rentals: React.FC = () => {
             }
         }
 
-        setFormData(prev => ({ 
-            ...prev, 
+        setFormData(prev => ({
+            ...prev,
             monthlyRate: selectedBillboard.ratePerSlot || 0,
-            slotNumber: nextSlot
+            slotNumber: nextSlot,
+            currency: inheritedCurrency,
         }));
     }
   }, [formData.billboardId, selectedBillboard, batchItems]); // Added batchItems to re-eval if cart changes
@@ -206,8 +214,17 @@ export const Rentals: React.FC = () => {
           return;
       }
 
-      const detailText = selectedBillboard.type === BillboardType.Static 
-          ? (formData.side === 'Both' ? "Sides A & B" : `Side ${formData.side}`) 
+      // A consolidated invoice can only carry one currency — reject a
+      // billboard whose denomination differs from items already in the cart.
+      // Users needing mixed-currency rentals run one batch per currency.
+      const billboardCurrency = (selectedBillboard.currency || getDefaultCurrency()) as Currency;
+      if (batchItems.length > 0 && batchItems[0].currency !== billboardCurrency) {
+          toast.warning(`Batch is ${batchItems[0].currency}; this billboard bills in ${billboardCurrency}. Create a separate batch for the other currency.`);
+          return;
+      }
+
+      const detailText = selectedBillboard.type === BillboardType.Static
+          ? (formData.side === 'Both' ? "Sides A & B" : `Side ${formData.side}`)
           : `Slot ${formData.slotNumber}`;
 
       const newItem: BatchItem = {
@@ -217,6 +234,7 @@ export const Rentals: React.FC = () => {
           monthlyRate: formData.monthlyRate,
           installationCost: formData.installationCost,
           printingCost: formData.printingCost,
+          currency: billboardCurrency,
           details: detailText,
           tempId: Date.now()
       };
@@ -227,13 +245,16 @@ export const Rentals: React.FC = () => {
       // Use setTimeout to ensure React batching doesn't miss the reset for the Select component
       setTimeout(() => {
           setFormData(prev => ({
-              ...prev, 
-              billboardId: '', 
-              monthlyRate: 0, 
-              installationCost: 0, 
+              ...prev,
+              billboardId: '',
+              monthlyRate: 0,
+              installationCost: 0,
               printingCost: 0,
               side: 'A',
-              slotNumber: 1
+              slotNumber: 1,
+              // keep currency pinned to the batch's currency so subsequent
+              // picks stay in the right denomination
+              currency: prev.currency,
           }));
       }, 50);
   };
@@ -250,19 +271,24 @@ export const Rentals: React.FC = () => {
       const invoiceItems: { description: string; amount: number }[] = [];
       const createdContracts: Contract[] = [];
       let totalSubtotal = 0;
+      // addToBatch enforces a single-currency batch, so every item carries
+      // the same currency — snapshot the first one onto each contract and
+      // the consolidated invoice.
+      const batchCurrency: Currency = batchItems[0].currency;
 
       // Create Contracts
       batchItems.forEach(item => {
           const contractId = `C-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
           const subtotal = (item.monthlyRate * 12) + item.installationCost + item.printingCost; // Basic annual est for value, but invoice is monthly
           const vat = formData.hasVat ? subtotal * VAT_RATE : 0;
-          
+
           const contract: Contract = {
               id: contractId,
               clientId: formData.clientId,
               billboardId: item.billboardId,
               startDate: formData.startDate,
               endDate: formData.endDate,
+              currency: item.currency,
               monthlyRate: item.monthlyRate,
               installationCost: item.installationCost,
               printingCost: item.printingCost,
@@ -273,7 +299,7 @@ export const Rentals: React.FC = () => {
               slotNumber: item.slotNumber,
               details: item.details
           };
-          
+
           addContract(contract);
           createdContracts.push(contract);
           createdContractIds.push(contractId);
@@ -283,7 +309,7 @@ export const Rentals: React.FC = () => {
           invoiceItems.push({ description: `Rental: ${billboardName} (${item.details})`, amount: item.monthlyRate });
           if(item.installationCost > 0) invoiceItems.push({ description: `Install: ${billboardName}`, amount: item.installationCost });
           if(item.printingCost > 0) invoiceItems.push({ description: `Print: ${billboardName}`, amount: item.printingCost });
-          
+
           totalSubtotal += item.monthlyRate + item.installationCost + item.printingCost;
       });
 
@@ -294,6 +320,7 @@ export const Rentals: React.FC = () => {
           contractIds: createdContractIds, // Link to all created contracts
           clientId: formData.clientId,
           date: new Date().toISOString().split('T')[0],
+          currency: batchCurrency,
           items: invoiceItems,
           subtotal: totalSubtotal,
           vatAmount: invoiceVat,
@@ -339,12 +366,14 @@ export const Rentals: React.FC = () => {
         ? (formData.side === 'Both' ? "Sides A & B" : `Side ${formData.side}`) 
         : `Slot ${formData.slotNumber}`;
 
+    const contractCurrency = (selectedBillboard?.currency || formData.currency || getDefaultCurrency()) as Currency;
     const rental: Contract = {
         id: rentalId,
         clientId: formData.clientId,
         billboardId: formData.billboardId,
         startDate: formData.startDate,
         endDate: formData.endDate,
+        currency: contractCurrency,
         monthlyRate: formData.monthlyRate,
         installationCost: formData.installationCost,
         printingCost: formData.printingCost,
@@ -365,6 +394,7 @@ export const Rentals: React.FC = () => {
         contractId: rentalId,
         clientId: formData.clientId,
         date: new Date().toISOString().split('T')[0],
+        currency: contractCurrency,
         items: [
             { description: `Rental: ${selectedBillboard?.name} (${rental.details}) - Month 1`, amount: formData.monthlyRate },
             ...(formData.installationCost > 0 ? [{ description: 'Installation Fee', amount: formData.installationCost }] : []),
@@ -386,7 +416,7 @@ export const Rentals: React.FC = () => {
   };
 
   const resetForm = () => {
-      setFormData({ clientId: '', billboardId: '', side: 'A', slotNumber: 1, startDate: '', endDate: '', monthlyRate: 0, installationCost: 0, printingCost: 0, hasVat: true });
+      setFormData({ clientId: '', billboardId: '', side: 'A', slotNumber: 1, startDate: '', endDate: '', monthlyRate: 0, installationCost: 0, printingCost: 0, hasVat: true, currency: getDefaultCurrency() });
       setBatchItems([]);
       setIsBatchMode(false);
   };
@@ -459,10 +489,10 @@ export const Rentals: React.FC = () => {
                 <div className="flex flex-col lg:items-end">
                     <div className="flex items-center gap-2">
                         <span className="text-xs sm:text-sm text-slate-400 font-medium hidden sm:inline">Value:</span>
-                        <span className="text-lg sm:text-2xl font-bold text-slate-900 tracking-tight">${contract.totalContractValue.toLocaleString()}</span>
+                        <span className="text-lg sm:text-2xl font-bold text-slate-900 tracking-tight" title={`Currency: ${contract.currency || 'USD'}`}>{formatCurrency(contract.totalContractValue, contract.currency)}</span>
                     </div>
                     <div className="flex gap-2 text-[10px] text-slate-500 uppercase tracking-wide">
-                        {contract.monthlyRate > 0 && <span>${contract.monthlyRate}/mo</span>}
+                        {contract.monthlyRate > 0 && <span>{formatCurrency(contract.monthlyRate, contract.currency)}/mo</span>}
                     </div>
                 </div>
                 
@@ -580,7 +610,7 @@ export const Rentals: React.FC = () => {
                                                 <label key={side} className={`flex-1 relative cursor-pointer border rounded-xl p-3 text-center transition-all ${!available ? 'opacity-40 bg-slate-100 cursor-not-allowed border-slate-100' : isSelected ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-500 shadow-sm' : 'border-slate-200 hover:border-slate-300'}`}>
                                                     <input type="radio" name="side" className="hidden" disabled={!available} checked={isSelected} onChange={() => available && setFormData(prev => ({...prev, side, monthlyRate: price}))} />
                                                     <div className="font-bold text-slate-800">{side === 'Both' ? 'Both A&B' : `Side ${side}`}</div>
-                                                    <div className="text-xs text-slate-500">${price.toLocaleString()}</div>
+                                                    <div className="text-xs text-slate-500">{formatCurrency(price, selectedBillboard.currency)}</div>
                                                     {!available && <div className="text-[10px] text-red-500 font-bold uppercase mt-1">Occupied</div>}
                                                     {isSelected && <div className="absolute top-2 right-2 text-blue-500"><CheckCircle size={14}/></div>}
                                                 </label>
@@ -593,10 +623,11 @@ export const Rentals: React.FC = () => {
                                 )}
 
                                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-                                    <MinimalInput label="Monthly Rate ($)" type="number" value={formData.monthlyRate} onChange={(e: any) => setFormData(prev => ({...prev, monthlyRate: Number(e.target.value)}))} />
-                                    <MinimalInput label="Install Fee ($)" type="number" value={formData.installationCost} onChange={(e: any) => setFormData(prev => ({...prev, installationCost: Number(e.target.value)}))} />
-                                    <MinimalInput label="Print Cost ($)" type="number" value={formData.printingCost} onChange={(e: any) => setFormData(prev => ({...prev, printingCost: Number(e.target.value)}))} />
+                                    <MinimalInput label={`Monthly Rate (${formData.currency || 'USD'})`} type="number" value={formData.monthlyRate} onChange={(e: any) => setFormData(prev => ({...prev, monthlyRate: Number(e.target.value)}))} />
+                                    <MinimalInput label={`Install Fee (${formData.currency || 'USD'})`} type="number" value={formData.installationCost} onChange={(e: any) => setFormData(prev => ({...prev, installationCost: Number(e.target.value)}))} />
+                                    <MinimalInput label={`Print Cost (${formData.currency || 'USD'})`} type="number" value={formData.printingCost} onChange={(e: any) => setFormData(prev => ({...prev, printingCost: Number(e.target.value)}))} />
                                 </div>
+                                <div className="mt-2 text-[10px] text-slate-400 font-medium uppercase tracking-wide">Billing currency inherited from billboard: <span className="font-bold text-slate-700">{formData.currency || 'USD'}</span></div>
                             </>
                         )}
 
@@ -633,15 +664,15 @@ export const Rentals: React.FC = () => {
                                             <tr key={item.tempId} className="hover:bg-slate-50/50">
                                                 <td className="px-4 py-3 font-bold text-slate-800">{getBillboardName(item.billboardId)}</td>
                                                 <td className="px-4 py-3">{item.details}</td>
-                                                <td className="px-4 py-3 text-right">${item.monthlyRate.toLocaleString()}</td>
+                                                <td className="px-4 py-3 text-right">{formatCurrency(item.monthlyRate, item.currency)}</td>
                                                 <td className="px-4 py-3 text-center">
                                                     <button type="button" onClick={() => removeFromBatch(item.tempId)} className="text-red-400 hover:text-red-600 p-1"><MinusCircle size={16}/></button>
                                                 </td>
                                             </tr>
                                         ))}
                                         <tr className="bg-slate-50 font-bold text-slate-900">
-                                            <td className="px-4 py-3 text-right" colSpan={2}>Total Monthly:</td>
-                                            <td className="px-4 py-3 text-right">${batchItems.reduce((acc, i) => acc + i.monthlyRate, 0).toLocaleString()}</td>
+                                            <td className="px-4 py-3 text-right" colSpan={2}>Total Monthly ({batchItems[0]?.currency || 'USD'}):</td>
+                                            <td className="px-4 py-3 text-right">{formatCurrency(batchItems.reduce((acc, i) => acc + i.monthlyRate, 0), batchItems[0]?.currency)}</td>
                                             <td></td>
                                         </tr>
                                     </tbody>

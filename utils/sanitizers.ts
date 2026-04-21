@@ -60,17 +60,85 @@ export const formatPhoneNumber = (phone: string | undefined): string => {
 };
 
 /**
- * Format currency for display
+ * Format currency for display.
+ *
+ * USD renders with the familiar $ prefix ($1,234). ZWG (Zimbabwe Gold, ISO
+ * 4217 code added 2024) is not yet in every runtime's CLDR data — an
+ * unrecognised Intl `currency` can throw RangeError on older engines — so
+ * we format it manually as "ZWG 1,234" to keep rendering stable everywhere.
+ * An explicit symbol prefix is intentional: the two currencies must look
+ * visibly distinct in every table and card since their totals are never
+ * summed together.
  */
-export const formatCurrency = (amount: number | undefined, currency: string = 'USD'): string => {
-  if (amount === undefined || amount === null) return '-';
-  
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency,
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  }).format(amount);
+export const formatCurrency = (
+  amount: number | undefined | null,
+  currency: string = 'USD',
+): string => {
+  if (amount === undefined || amount === null || !Number.isFinite(amount)) return '-';
+
+  const code = (currency || 'USD').toUpperCase();
+
+  if (code === 'ZWG') {
+    const body = new Intl.NumberFormat('en-US', {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    }).format(amount);
+    return `ZWG ${body}`;
+  }
+
+  try {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: code,
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    }).format(amount);
+  } catch {
+    // Unknown/unsupported code — degrade to "<CODE> <number>"
+    const body = new Intl.NumberFormat('en-US', {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    }).format(amount);
+    return `${code} ${body}`;
+  }
+};
+
+/**
+ * Group { currency, amount } rows into a { USD: n, ZWG: n } map.
+ * Used by dashboards to split revenue/expense/profit totals instead of
+ * incorrectly summing mixed-currency rows into a single scalar.
+ */
+export const sumByCurrency = <T>(
+  rows: T[],
+  getAmount: (row: T) => number | undefined,
+  getCurrency: (row: T) => string | undefined,
+  defaultCurrency: string = 'USD',
+): Record<string, number> => {
+  const totals: Record<string, number> = {};
+  for (const row of rows) {
+    const amt = getAmount(row);
+    if (amt === undefined || amt === null || !Number.isFinite(amt)) continue;
+    const code = (getCurrency(row) || defaultCurrency).toUpperCase();
+    totals[code] = (totals[code] || 0) + amt;
+  }
+  return totals;
+};
+
+/**
+ * Render a { USD: n, ZWG: n } map as a compact multi-line string for KPI
+ * cards. Zero-value currencies are dropped. When the map is empty the
+ * fallback currency renders as 0 so cards never show a bare "-".
+ */
+export const formatCurrencyTotals = (
+  totals: Record<string, number>,
+  fallback: string = 'USD',
+): string => {
+  const entries = Object.entries(totals).filter(([, v]) => Number.isFinite(v) && v !== 0);
+  if (entries.length === 0) return formatCurrency(0, fallback);
+  return entries
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([code, value]) => formatCurrency(value, code))
+    .join(' · ');
 };
 
 /**

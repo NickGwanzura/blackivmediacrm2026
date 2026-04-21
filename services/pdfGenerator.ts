@@ -4,6 +4,7 @@ import autoTable from 'jspdf-autotable';
 import { Invoice, Contract, Client, Billboard, MaintenanceLog, PrintingJob, Expense } from '../types';
 import { getCompanyProfile, getCompanyLogo } from './mockData';
 import { toast } from '../components/Toast';
+import { formatCurrency, formatCurrencyTotals, sumByCurrency } from '../utils/sanitizers';
 
 // Colors
 const COLOR_PRIMARY = [15, 23, 42]; // Slate 900
@@ -145,18 +146,18 @@ export const generateProfitAnalyticsPDF = (
         doc.setFontSize(10);
         doc.setFont("helvetica", "normal");
         
-        // Row 1
+        // Row 1 — scalars represent the primary (reporting) currency
         doc.text("Total Revenue", 20, currentY + 18);
-        doc.text(`$${totals.revenue.toLocaleString()}`, 80, currentY + 18, { align: 'right' });
-        
+        doc.text(formatCurrency(totals.revenue, (totals as any).currency), 80, currentY + 18, { align: 'right' });
+
         doc.text("Total Expenses", 110, currentY + 18);
-        doc.text(`$${totals.expenses.toLocaleString()}`, 170, currentY + 18, { align: 'right' });
+        doc.text(formatCurrency(totals.expenses, (totals as any).currency), 170, currentY + 18, { align: 'right' });
 
         // Row 2
         doc.setFont("helvetica", "bold");
         doc.text("Net Profit", 20, currentY + 28);
         doc.setTextColor(totals.profit >= 0 ? 22 : 220, totals.profit >= 0 ? 163 : 38, totals.profit >= 0 ? 74 : 38);
-        doc.text(`$${totals.profit.toLocaleString()}`, 80, currentY + 28, { align: 'right' });
+        doc.text(formatCurrency(totals.profit, (totals as any).currency), 80, currentY + 28, { align: 'right' });
 
         doc.setTextColor(COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2]);
         doc.text("Profit Margin", 110, currentY + 28);
@@ -171,9 +172,9 @@ export const generateProfitAnalyticsPDF = (
 
         const trendRows = trends.map(t => [
             t.name,
-            `$${t.revenue.toLocaleString()}`,
-            `$${t.expenses.toLocaleString()}`,
-            `$${(t.revenue - t.expenses).toLocaleString()}`
+            formatCurrency(t.revenue, t.currency),
+            formatCurrency(t.expenses, t.currency),
+            formatCurrency(t.revenue - t.expenses, t.currency)
         ]);
 
         runAutoTable(doc, {
@@ -192,7 +193,7 @@ export const generateProfitAnalyticsPDF = (
 
         const expenseRows = expenseBreakdown.map(e => [
             e.name,
-            `$${e.value.toLocaleString()}`,
+            formatCurrency(e.value, e.currency),
             `${((e.value / totals.expenses) * 100).toFixed(1)}%`
         ]);
 
@@ -232,7 +233,7 @@ export const generateActiveRentalsPDF = (contracts: Contract[], getClientName: a
             getBillboardName(c.billboardId),
             c.details,
             c.endDate,
-            `$${c.monthlyRate.toLocaleString()}`
+            formatCurrency(c.monthlyRate, c.currency)
         ]);
 
         runAutoTable(doc, {
@@ -244,12 +245,12 @@ export const generateActiveRentalsPDF = (contracts: Contract[], getClientName: a
             columnStyles: { 4: { halign: 'right', fontStyle: 'bold' } }
         });
 
-        // Total Monthly
-        const totalMonthly = activeContracts.reduce((sum, c) => sum + c.monthlyRate, 0);
+        // Total MRR split by currency to avoid summing across denominations
+        const mrrByCurrency = sumByCurrency(activeContracts, c => c.monthlyRate, c => c.currency);
         const finalY = (doc as any).lastAutoTable?.finalY + 10;
-        
+
         doc.setFontSize(10);
-        doc.text(`Total Monthly Recurring Revenue (MRR): $${totalMonthly.toLocaleString()}`, 14, finalY);
+        doc.text(`Total Monthly Recurring Revenue (MRR): ${formatCurrencyTotals(mrrByCurrency)}`, 14, finalY);
 
         addFooter(doc, 1);
         doc.save(`Active_Rentals_${new Date().toISOString().slice(0,10)}.pdf`);
@@ -274,7 +275,7 @@ export const generatePaymentSchedulePDF = (schedule: any[]) => {
             s.clientName,
             s.date,
             s.day,
-            `$${s.amount.toLocaleString()}`
+            s.amountByCurrency ? formatCurrencyTotals(s.amountByCurrency) : formatCurrency(s.amount, s.currency)
         ]);
 
         runAutoTable(doc, {
@@ -308,7 +309,7 @@ export const generateReceivedPaymentsPDF = (receipts: Invoice[], getClientName: 
             getClientName(r.clientId),
             r.paymentMethod || 'N/A',
             r.paymentReference || '-',
-            `$${r.total.toLocaleString()}`
+            formatCurrency(r.total, r.currency)
         ]);
 
         runAutoTable(doc, {
@@ -320,10 +321,11 @@ export const generateReceivedPaymentsPDF = (receipts: Invoice[], getClientName: 
             columnStyles: { 5: { halign: 'right', fontStyle: 'bold' } }
         });
 
-        const totalReceived = receipts.reduce((sum, r) => sum + r.total, 0);
+        // Split totals by currency to avoid cross-denomination arithmetic
+        const receivedByCurrency = sumByCurrency(receipts, r => r.total, r => r.currency);
         const finalY = (doc as any).lastAutoTable?.finalY + 10;
         doc.setFontSize(10);
-        doc.text(`Total Received: $${totalReceived.toLocaleString()}`, 14, finalY);
+        doc.text(`Total Received: ${formatCurrencyTotals(receivedByCurrency)}`, 14, finalY);
 
         addFooter(doc, 1);
         doc.save(`Received_Payments_${new Date().toISOString().slice(0,10)}.pdf`);
@@ -454,20 +456,20 @@ export const generateInvoicePDF = (invoice: Invoice, client: Client, options?: P
     doc.setFontSize(10);
     doc.setTextColor(COLOR_TEXT_LIGHT[0], COLOR_TEXT_LIGHT[1], COLOR_TEXT_LIGHT[2]);
     doc.text(`Subtotal:`, totalsX, finalY + 10);
-    doc.text(`$${(invoice.subtotal || 0).toFixed(2)}`, valX, finalY + 10, { align: 'right' });
-    
+    doc.text(formatCurrency(invoice.subtotal || 0, invoice.currency), valX, finalY + 10, { align: 'right' });
+
     doc.text(`VAT (15%):`, totalsX, finalY + 15);
-    doc.text(`$${(invoice.vatAmount || 0).toFixed(2)}`, valX, finalY + 15, { align: 'right' });
-    
+    doc.text(formatCurrency(invoice.vatAmount || 0, invoice.currency), valX, finalY + 15, { align: 'right' });
+
     // Total Bar
     doc.setFillColor(COLOR_ACCENT[0], COLOR_ACCENT[1], COLOR_ACCENT[2]);
     doc.rect(totalsX - 5, finalY + 20, 75, 10, 'F');
-    
+
     doc.setFontSize(12);
     doc.setTextColor(255, 255, 255);
     doc.setFont("helvetica", "bold");
     doc.text(`Total:`, totalsX, finalY + 26.5);
-    doc.text(`$${(invoice.total || 0).toFixed(2)}`, valX, finalY + 26.5, { align: 'right' });
+    doc.text(formatCurrency(invoice.total || 0, invoice.currency), valX, finalY + 26.5, { align: 'right' });
 
     addFooter(doc, 1);
     return finalizePdf(doc, `${invoice.type}_${invoice.id}.pdf`, options);
@@ -525,7 +527,7 @@ export const generateMasterContractPDF = (contracts: Contract[], client: Client,
             billboardNameGetter(c.billboardId),
             c.details,
             `${c.startDate} to ${c.endDate}`,
-            `$${c.monthlyRate.toLocaleString()}`
+            formatCurrency(c.monthlyRate, c.currency)
         ]);
 
         runAutoTable(doc, {
@@ -538,17 +540,17 @@ export const generateMasterContractPDF = (contracts: Contract[], client: Client,
             columnStyles: { 3: { halign: 'right', fontStyle: 'bold' } }
         });
 
-        // Totals
-        const totalMonthly = contracts.reduce((acc, c) => acc + c.monthlyRate, 0);
-        const totalValue = contracts.reduce((acc, c) => acc + c.totalContractValue, 0);
-        
+        // Totals split by currency — contracts may be denominated differently
+        const monthlyByCurrency = sumByCurrency(contracts, c => c.monthlyRate, c => c.currency);
+        const valueByCurrency = sumByCurrency(contracts, c => c.totalContractValue, c => c.currency);
+
         currentY = (doc as any).lastAutoTable.finalY + 15;
-        
+
         doc.setFontSize(10);
         doc.setTextColor(COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2]);
         doc.setFont("helvetica", "bold");
-        doc.text(`Total Monthly Rental: $${totalMonthly.toLocaleString()}`, 14, currentY);
-        doc.text(`Total Agreement Value: $${totalValue.toLocaleString()}`, 14, currentY + 6);
+        doc.text(`Total Monthly Rental: ${formatCurrencyTotals(monthlyByCurrency)}`, 14, currentY);
+        doc.text(`Total Agreement Value: ${formatCurrencyTotals(valueByCurrency)}`, 14, currentY + 6);
 
         // Terms
         currentY += 20;
@@ -614,8 +616,8 @@ export const generateContractsReportPDF = (contracts: Contract[], getClientName:
             getClientName(contract.clientId),
             `${getBillboardName(contract.billboardId)} (${contract.details})`,
             `${contract.startDate} to ${contract.endDate}`,
-            `$${contract.monthlyRate.toLocaleString()}`,
-            `$${contract.totalContractValue.toLocaleString()}`,
+            formatCurrency(contract.monthlyRate, contract.currency),
+            formatCurrency(contract.totalContractValue, contract.currency),
             contract.status
         ]);
 
@@ -633,25 +635,26 @@ export const generateContractsReportPDF = (contracts: Contract[], getClientName:
             alternateRowStyles: { fillColor: [248, 250, 252] }
         });
 
-        // Summary Totals
-        const totalMonthly = contracts.filter(c => c.status === 'Active').reduce((acc, c) => acc + c.monthlyRate, 0);
-        const totalValue = contracts.filter(c => c.status === 'Active').reduce((acc, c) => acc + c.totalContractValue, 0);
-        
+        // Summary Totals split by currency for active contracts
+        const activeContracts = contracts.filter(c => c.status === 'Active');
+        const totalMonthlyByCurrency = sumByCurrency(activeContracts, c => c.monthlyRate, c => c.currency);
+        const totalValueByCurrency = sumByCurrency(activeContracts, c => c.totalContractValue, c => c.currency);
+
         const finalY = (doc as any).lastAutoTable?.finalY || currentY + 20;
-        
+
         if (finalY < 250) {
             doc.setFillColor(245, 247, 250);
             doc.roundedRect(14, finalY + 10, 100, 25, 2, 2, 'F');
-            
+
             doc.setFontSize(10);
             doc.setTextColor(COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2]);
             doc.setFont("helvetica", "bold");
             doc.text("Active Contracts Summary", 20, finalY + 18);
-            
+
             doc.setFontSize(9);
             doc.setFont("helvetica", "normal");
-            doc.text(`Total Monthly Revenue: $${totalMonthly.toLocaleString()}`, 20, finalY + 25);
-            doc.text(`Total Contract Value: $${totalValue.toLocaleString()}`, 20, finalY + 30);
+            doc.text(`Total Monthly Revenue: ${formatCurrencyTotals(totalMonthlyByCurrency)}`, 20, finalY + 25);
+            doc.text(`Total Contract Value: ${formatCurrencyTotals(totalValueByCurrency)}`, 20, finalY + 30);
         }
 
         addFooter(doc, 1);
@@ -734,10 +737,10 @@ export const generateContractPDF = (contract: Contract, client: Client, billboar
     currentY += 10;
 
     const financeRows = [
-        ['Monthly Rental', `$${contract.monthlyRate.toFixed(2)}`],
-        ['Installation Fee', `$${contract.installationCost.toFixed(2)}`],
-        ['Production/Printing', `$${contract.printingCost.toFixed(2)}`],
-        ['Total Contract Value', `$${contract.totalContractValue.toFixed(2)}`],
+        ['Monthly Rental', formatCurrency(contract.monthlyRate, contract.currency)],
+        ['Installation Fee', formatCurrency(contract.installationCost, contract.currency)],
+        ['Production/Printing', formatCurrency(contract.printingCost, contract.currency)],
+        ['Total Contract Value', formatCurrency(contract.totalContractValue, contract.currency)],
         ['Payment Terms', 'Invoiced monthly in advance. Due on the 1st.']
     ];
 
@@ -821,27 +824,39 @@ export const generateStatementPDF = (client: Client, transactions: Invoice[], ac
         doc.text(`Attn: ${client.contactPerson}`, 20, currentY + 14);
         doc.text(client.email, 20, currentY + 19);
 
-        // Balance Summary Right
-        const totalBilled = transactions.filter(t => t.type === 'Invoice').reduce((acc, t) => acc + t.total, 0);
-        const totalPaid = transactions.filter(t => t.type === 'Receipt').reduce((acc, t) => acc + t.total, 0);
-        const balance = totalBilled - totalPaid;
+        // Balance Summary split by currency — never aggregate across denominations
+        const invoices = transactions.filter(t => t.type === 'Invoice');
+        const receipts = transactions.filter(t => t.type === 'Receipt');
+        const billedByCurrency = sumByCurrency(invoices, t => t.total, t => t.currency);
+        const paidByCurrency = sumByCurrency(receipts, t => t.total, t => t.currency);
+        // Balance scalar (for color logic) uses USD/primary totals as a heuristic
+        const totalBilledScalar = invoices.reduce((acc, t) => acc + t.total, 0);
+        const totalPaidScalar = receipts.reduce((acc, t) => acc + t.total, 0);
+        const balance = totalBilledScalar - totalPaidScalar;
 
         const balX = 130;
         doc.setFontSize(10);
         doc.setTextColor(COLOR_TEXT_LIGHT[0], COLOR_TEXT_LIGHT[1], COLOR_TEXT_LIGHT[2]);
         doc.text("Total Invoiced:", balX, currentY + 6);
-        doc.text(`$${totalBilled.toFixed(2)}`, 196, currentY + 6, { align: 'right' });
-        
+        doc.text(formatCurrencyTotals(billedByCurrency), 196, currentY + 6, { align: 'right' });
+
         doc.text("Total Paid:", balX, currentY + 12);
-        doc.text(`$${totalPaid.toFixed(2)}`, 196, currentY + 12, { align: 'right' });
-        
+        doc.text(formatCurrencyTotals(paidByCurrency), 196, currentY + 12, { align: 'right' });
+
+        // Compute balance per-currency for the "Amount Due" row
+        const balanceByCurrency: Record<string, number> = {};
+        const allCurrencies = new Set([...Object.keys(billedByCurrency), ...Object.keys(paidByCurrency)]);
+        allCurrencies.forEach(c => {
+            balanceByCurrency[c] = (billedByCurrency[c] || 0) - (paidByCurrency[c] || 0);
+        });
+
         doc.setFillColor(balance > 0 ? 254 : 240, balance > 0 ? 242 : 253, balance > 0 ? 242 : 244);
         doc.rect(balX - 2, currentY + 16, 70, 10, 'F');
         doc.setFontSize(12);
         doc.setTextColor(balance > 0 ? 220 : 22, balance > 0 ? 38 : 163, balance > 0 ? 38 : 74);
         doc.setFont("helvetica", "bold");
         doc.text("Amount Due:", balX, currentY + 23);
-        doc.text(`$${balance.toFixed(2)}`, 196, currentY + 23, { align: 'right' });
+        doc.text(formatCurrencyTotals(balanceByCurrency), 196, currentY + 23, { align: 'right' });
 
         currentY += 35;
 
@@ -852,7 +867,7 @@ export const generateStatementPDF = (client: Client, transactions: Invoice[], ac
         const rentalRows = activeRentals.map(r => [
             billboardNameGetter(r.billboardId),
             r.details,
-            `$${r.monthlyRate}/mo`,
+            `${formatCurrency(r.monthlyRate, r.currency)}/mo`,
             `${r.startDate} - ${r.endDate}`
         ]);
         
@@ -872,8 +887,8 @@ export const generateStatementPDF = (client: Client, transactions: Invoice[], ac
             t.date,
             t.type.toUpperCase(),
             t.id,
-            t.type === 'Invoice' ? `$${t.total.toFixed(2)}` : '-',
-            t.type === 'Receipt' ? `$${t.total.toFixed(2)}` : '-'
+            t.type === 'Invoice' ? formatCurrency(t.total, t.currency) : '-',
+            t.type === 'Receipt' ? formatCurrency(t.total, t.currency) : '-'
         ]);
 
         runAutoTable(doc, {
@@ -990,6 +1005,7 @@ export interface AvailabilityReportTotals {
     totalRented: number;
     totalAvailable: number;
     occupancy: number;
+    overbookedCount?: number;
 }
 
 export const generateAvailabilityReportPDF = (
@@ -1023,6 +1039,16 @@ export const generateAvailabilityReportPDF = (
         doc.text(`Occupancy: ${totals.occupancy.toFixed(1)}%`, 170, currentY);
 
         currentY += 10;
+
+        if ((totals.overbookedCount ?? 0) > 0) {
+            doc.setFontSize(10);
+            doc.setTextColor(220, 38, 38);
+            doc.setFont('helvetica', 'bold');
+            doc.text(`Overbooked assets: ${totals.overbookedCount}`, 14, currentY);
+            doc.setFont('helvetica', 'normal');
+            doc.setTextColor(COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2]);
+            currentY += 8;
+        }
 
         // Town breakdown
         if (townBreakdown.length > 0) {
@@ -1077,6 +1103,7 @@ export const generateAvailabilityReportPDF = (
                 if (text === 'Available') data.cell.styles.textColor = [22, 163, 74];
                 else if (text === 'Partial') data.cell.styles.textColor = [217, 119, 6];
                 else if (text === 'Fully Booked') data.cell.styles.textColor = [220, 38, 38];
+                else if (text === 'Overbooked') { data.cell.styles.textColor = [190, 18, 60]; data.cell.styles.fillColor = [255, 228, 230]; }
             },
             didDrawPage: (data: any) => {
                 addFooter(doc, data.pageNumber, 'Confidential Availability Report');
@@ -1234,17 +1261,24 @@ export const generateCostReportPDF = (clients: Client[], printingJobs: PrintingJ
         const printRows = clients.map(client => {
             const jobs = printingJobs.filter(j => j.clientId === client.id);
             if (jobs.length === 0) return null;
-            const totalSpent = jobs.reduce((acc, curr) => acc + curr.chargedAmount, 0);
-            const totalCost = jobs.reduce((acc, curr) => acc + curr.totalCost, 0);
-            const profit = totalSpent - totalCost;
-            const margin = totalSpent > 0 ? ((profit / totalSpent) * 100).toFixed(1) + '%' : '0%';
-            
+            // Split by currency — jobs may be in different denominations
+            const spentByCurrency = sumByCurrency(jobs, j => j.chargedAmount, j => j.currency);
+            const costByCurrency = sumByCurrency(jobs, j => j.totalCost, j => j.currency);
+            const profitByCurrency: Record<string, number> = {};
+            const allCur = new Set([...Object.keys(spentByCurrency), ...Object.keys(costByCurrency)]);
+            allCur.forEach(c => {
+                profitByCurrency[c] = (spentByCurrency[c] || 0) - (costByCurrency[c] || 0);
+            });
+            const totalSpentScalar = jobs.reduce((acc, curr) => acc + curr.chargedAmount, 0);
+            const totalCostScalar = jobs.reduce((acc, curr) => acc + curr.totalCost, 0);
+            const margin = totalSpentScalar > 0 ? (((totalSpentScalar - totalCostScalar) / totalSpentScalar) * 100).toFixed(1) + '%' : '0%';
+
             return [
                 client.companyName,
                 jobs.length.toString(),
-                `$${totalSpent.toLocaleString()}`,
-                `$${totalCost.toLocaleString()}`,
-                `$${profit.toLocaleString()}`,
+                formatCurrencyTotals(spentByCurrency),
+                formatCurrencyTotals(costByCurrency),
+                formatCurrencyTotals(profitByCurrency),
                 margin
             ];
         }).filter(row => row !== null);
@@ -1274,7 +1308,7 @@ export const generateCostReportPDF = (clients: Client[], printingJobs: PrintingJ
             exp.category,
             exp.description,
             exp.reference || '-',
-            `$${exp.amount.toLocaleString()}`
+            formatCurrency(exp.amount, exp.currency)
         ]);
 
         runAutoTable(doc, {
@@ -1287,10 +1321,14 @@ export const generateCostReportPDF = (clients: Client[], printingJobs: PrintingJ
             columnStyles: { 4: { halign: 'right', fontStyle: 'bold' } }
         });
 
-        // Summary Box
-        const totalPrintCost = printingJobs.reduce((acc, j) => acc + j.totalCost, 0);
-        const totalOpsCost = expenses.reduce((acc, e) => acc + e.amount, 0);
-        const totalCost = totalPrintCost + totalOpsCost;
+        // Summary Box — split by currency to avoid cross-denomination arithmetic
+        const printCostByCurrency = sumByCurrency(printingJobs, j => j.totalCost, j => j.currency);
+        const opsCostByCurrency = sumByCurrency(expenses, e => e.amount, e => e.currency);
+        const totalCostByCurrency: Record<string, number> = {};
+        const allCostCur = new Set([...Object.keys(printCostByCurrency), ...Object.keys(opsCostByCurrency)]);
+        allCostCur.forEach(c => {
+            totalCostByCurrency[c] = (printCostByCurrency[c] || 0) + (opsCostByCurrency[c] || 0);
+        });
 
         const finalY = (doc as any).lastAutoTable?.finalY + 15;
         doc.setFillColor(248, 250, 252);
@@ -1302,13 +1340,13 @@ export const generateCostReportPDF = (clients: Client[], printingJobs: PrintingJ
         doc.setTextColor(COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2]);
         doc.setFont("helvetica", "bold");
         doc.text("Total Expense Summary", 20, finalY + 8);
-        
+
         doc.setFontSize(9);
         doc.setFont("helvetica", "normal");
-        doc.text(`Total Printing Costs: $${totalPrintCost.toLocaleString()}`, 20, finalY + 16);
-        doc.text(`Total Operational Expenses: $${totalOpsCost.toLocaleString()}`, 20, finalY + 22);
+        doc.text(`Total Printing Costs: ${formatCurrencyTotals(printCostByCurrency)}`, 20, finalY + 16);
+        doc.text(`Total Operational Expenses: ${formatCurrencyTotals(opsCostByCurrency)}`, 20, finalY + 22);
         doc.setFont("helvetica", "bold");
-        doc.text(`Total System Spend: $${totalCost.toLocaleString()}`, 20, finalY + 28);
+        doc.text(`Total System Spend: ${formatCurrencyTotals(totalCostByCurrency)}`, 20, finalY + 28);
 
         addFooter(doc, 1, "Confidential Cost Report");
         doc.save(`Cost_Report_${new Date().toISOString().slice(0,10)}.pdf`);

@@ -1,32 +1,59 @@
 
 import React from 'react';
 import { getInvoices, getExpenses, mockPrintingJobs, mockOutsourcedBillboards, getFinancialTrends } from '../services/mockData';
-import { 
-    AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
+import {
+    AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
     PieChart, Pie, Cell, Legend
 } from 'recharts';
 import { TrendingUp, TrendingDown, DollarSign, Wallet, Download } from 'lucide-react';
 import { generateProfitAnalyticsPDF } from '../services/pdfGenerator';
+import { formatCurrency, formatCurrencyTotals, sumByCurrency } from '../utils/sanitizers';
 
 export const Analytics: React.FC = () => {
-    // 1. Calculate Revenue
-    const totalRevenue = getInvoices()
-        .filter(i => i.type === 'Invoice')
-        .reduce((acc, curr) => acc + curr.total, 0);
-    
-    // 2. Calculate Expenses
-    const operationalExpenses = getExpenses().reduce((acc, curr) => acc + curr.amount, 0);
-    const printingExpenses = mockPrintingJobs.reduce((acc, curr) => acc + curr.totalCost, 0);
-    const outsourcedPayouts = mockOutsourcedBillboards.reduce((acc, curr) => acc + (curr.monthlyPayout * 12), 0); // Annualized for demo
-    
-    const totalExpenses = operationalExpenses + printingExpenses + outsourcedPayouts;
-    const netProfit = totalRevenue - totalExpenses;
-    const profitMargin = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
+    // Dual-currency aggregation: revenue, expenses, and profit are computed
+    // per denomination. Totals never mix USD with ZWG — the KPI cards show
+    // "USD X · ZWG Y" and the trend/pie charts collapse to a reporting
+    // currency chosen by the primary (largest) revenue currency.
+    const invoiceRows = getInvoices().filter(i => i.type === 'Invoice');
+    const expenses = getExpenses();
+    const printingJobs = mockPrintingJobs;
+    const outsourcedRows = mockOutsourcedBillboards;
 
+    const revenueByCurrency = sumByCurrency(invoiceRows,    i => i.total,       i => i.currency);
+    const opsByCurrency     = sumByCurrency(expenses,       e => e.amount,      e => e.currency);
+    const printByCurrency   = sumByCurrency(printingJobs,   p => p.totalCost,   p => (p as any).currency);
+    const outsourcedByCurrency = sumByCurrency(outsourcedRows, o => (o.monthlyPayout || 0) * 12, o => o.currency); // annualized
+
+    const mergeTotals = (...maps: Record<string, number>[]): Record<string, number> => {
+        const out: Record<string, number> = {};
+        for (const m of maps) for (const [k, v] of Object.entries(m)) out[k] = (out[k] || 0) + v;
+        return out;
+    };
+    const expensesByCurrency = mergeTotals(opsByCurrency, printByCurrency, outsourcedByCurrency);
+    const profitByCurrency: Record<string, number> = {};
+    for (const code of new Set([...Object.keys(revenueByCurrency), ...Object.keys(expensesByCurrency)])) {
+        profitByCurrency[code] = (revenueByCurrency[code] || 0) - (expensesByCurrency[code] || 0);
+    }
+
+    // Legacy scalar totals for the trend chart / PDF — these collapse to a
+    // single number, which is only correct if all rows share one currency.
+    // Dashboards above handle the split case; this chart series is retained
+    // for the legacy USD-only historical data path.
+    const totalRevenue = Object.values(revenueByCurrency).reduce((a, v) => a + v, 0);
+    const totalExpenses = Object.values(expensesByCurrency).reduce((a, v) => a + v, 0);
+    const netProfit = totalRevenue - totalExpenses;
+    const primaryCurrency =
+        Object.entries(revenueByCurrency).sort((a, b) => b[1] - a[1])[0]?.[0] || 'USD';
+    const primaryRevenue = revenueByCurrency[primaryCurrency] || 0;
+    const primaryProfit  = profitByCurrency[primaryCurrency] || 0;
+    const profitMargin = primaryRevenue > 0 ? (primaryProfit / primaryRevenue) * 100 : 0;
+
+    // Pie chart split per-currency so "Operational (USD)" and
+    // "Operational (ZWG)" render as distinct slices.
     const expenseBreakdown = [
-        { name: 'Operational', value: operationalExpenses },
-        { name: 'Printing', value: printingExpenses },
-        { name: 'Outsourced', value: outsourcedPayouts },
+        ...Object.entries(opsByCurrency).map(([code, value]) => ({ name: `Operational (${code})`, value, currency: code })),
+        ...Object.entries(printByCurrency).map(([code, value]) => ({ name: `Printing (${code})`, value, currency: code })),
+        ...Object.entries(outsourcedByCurrency).map(([code, value]) => ({ name: `Outsourced (${code})`, value, currency: code })),
     ].filter(e => e.value > 0);
 
     // Use dynamic trend data derived from actual invoices/expenses
@@ -55,25 +82,25 @@ export const Analytics: React.FC = () => {
                 </button>
             </div>
 
-            {/* Scorecards */}
+            {/* Scorecards — dual currency: each card renders "USD X · ZWG Y" */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
                     <p className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-2">Total Revenue</p>
-                    <h3 className="text-4xl font-extrabold text-slate-900 tracking-tight">${totalRevenue.toLocaleString()}</h3>
+                    <h3 className="text-3xl md:text-4xl font-extrabold text-slate-900 tracking-tight break-words">{formatCurrencyTotals(revenueByCurrency)}</h3>
                     <div className="mt-4 flex items-center gap-2 text-green-600 bg-green-50 w-fit px-2 py-1 rounded-full text-xs font-bold">
                         <TrendingUp size={14} /> Based on Actuals
                     </div>
                 </div>
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
                     <p className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-2">Total Expenses</p>
-                    <h3 className="text-4xl font-extrabold text-slate-900 tracking-tight">${totalExpenses.toLocaleString()}</h3>
+                    <h3 className="text-3xl md:text-4xl font-extrabold text-slate-900 tracking-tight break-words">{formatCurrencyTotals(expensesByCurrency)}</h3>
                     <p className="text-xs text-slate-400 mt-2 font-medium">Includes payouts & production</p>
                 </div>
                 <div className="bg-slate-900 p-6 rounded-2xl shadow-lg border border-slate-800 text-white hover:shadow-xl transition-all duration-300 hover:-translate-y-1">
                     <p className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-2">Net Profit</p>
-                    <h3 className="text-4xl font-extrabold text-white tracking-tight">${netProfit.toLocaleString()}</h3>
+                    <h3 className="text-3xl md:text-4xl font-extrabold text-white tracking-tight break-words">{formatCurrencyTotals(profitByCurrency)}</h3>
                     <div className="mt-4 flex justify-between items-center">
-                        <span className="text-xs text-slate-400 font-medium">Margin</span>
+                        <span className="text-xs text-slate-400 font-medium">{primaryCurrency} Margin</span>
                         <span className={`font-bold ${profitMargin >= 0 ? 'text-green-400' : 'text-red-400'}`}>{profitMargin.toFixed(1)}%</span>
                     </div>
                 </div>
@@ -124,7 +151,7 @@ export const Analytics: React.FC = () => {
                                             <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                                         ))}
                                     </Pie>
-                                    <Tooltip contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0' }} />
+                                    <Tooltip formatter={(v: number, _n, p: any) => formatCurrency(v, p?.payload?.currency)} contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0' }} />
                                     <Legend verticalAlign="middle" align="right" layout="vertical" iconType="circle" />
                                  </PieChart>
                              ) : (
@@ -155,9 +182,9 @@ export const Analytics: React.FC = () => {
                         {monthlyData.length > 0 ? monthlyData.map((data, i) => (
                              <tr key={i} className="hover:bg-slate-50 transition-colors">
                                  <td className="px-6 py-4 font-bold text-slate-800">{data.month}</td>
-                                 <td className="px-6 py-4 text-right font-medium">${data.revenue.toLocaleString()}</td>
-                                 <td className="px-6 py-4 text-right font-medium">${data.expenses.toLocaleString()}</td>
-                                 <td className="px-6 py-4 text-right font-bold text-green-600">${data.profit.toLocaleString()}</td>
+                                 <td className="px-6 py-4 text-right font-medium">{formatCurrency(data.revenue, primaryCurrency)}</td>
+                                 <td className="px-6 py-4 text-right font-medium">{formatCurrency(data.expenses, primaryCurrency)}</td>
+                                 <td className="px-6 py-4 text-right font-bold text-green-600">{formatCurrency(data.profit, primaryCurrency)}</td>
                                  <td className="px-6 py-4 text-right">{data.revenue > 0 ? ((data.profit/data.revenue)*100).toFixed(1) : 0}%</td>
                              </tr>
                         )) : (

@@ -363,7 +363,11 @@ const ROW_MAPPERS = {
   billboards: (b) => ({
     id: b.id, name: b.name, location: b.location, town: b.town, type: b.type,
     width: b.width, height: b.height, coordinates: b.coordinates, image_url: b.imageUrl,
-    visibility: b.visibility, side_a_rate: b.sideARate, side_b_rate: b.sideBRate,
+    visibility: b.visibility,
+    // Dual-currency: default to USD when the client omits the field so we
+    // never write NULL into a NOT NULL column.
+    currency: b.currency || 'USD',
+    side_a_rate: b.sideARate, side_b_rate: b.sideBRate,
     side_a_status: b.sideAStatus, side_b_status: b.sideBStatus,
     side_a_client_id: b.sideAClientId || null, side_b_client_id: b.sideBClientId || null,
     rate_per_slot: b.ratePerSlot, total_slots: b.totalSlots, rented_slots: b.rentedSlots,
@@ -375,6 +379,7 @@ const ROW_MAPPERS = {
   contracts: (c) => ({
     id: c.id, client_id: c.clientId, billboard_id: c.billboardId,
     start_date: c.startDate || null, end_date: c.endDate || null,
+    currency: c.currency || 'USD',
     monthly_rate: c.monthlyRate, installation_cost: c.installationCost,
     printing_cost: c.printingCost, total_contract_value: c.totalContractValue,
     status: c.status, details: c.details, side: c.side,
@@ -383,13 +388,16 @@ const ROW_MAPPERS = {
   invoices: (i) => ({
     id: i.id, client_id: i.clientId,
     contract_id: i.contractId || (Array.isArray(i.contractIds) && i.contractIds[0]) || null,
-    date: i.date || null, items: i.items, subtotal: i.subtotal,
+    date: i.date || null,
+    currency: i.currency || 'USD',
+    items: i.items, subtotal: i.subtotal,
     vat_amount: i.vatAmount, total: i.total, status: i.status, type: i.type,
     payment_method: i.paymentMethod, payment_reference: i.paymentReference,
   }),
   expenses: (e) => ({
     id: e.id, category: e.category, description: e.description,
-    amount: e.amount, date: e.date || null, reference: e.reference,
+    amount: e.amount, currency: e.currency || 'USD',
+    date: e.date || null, reference: e.reference,
   }),
   // Note: password is intentionally NOT mapped — it's stripped upstream in
   // the /sync handler. Password writes go through /auth/* only.
@@ -403,6 +411,7 @@ const ROW_MAPPERS = {
     id: m.id, billboard_id: m.billboardId, date: m.date || null, type: m.type,
     technician: m.technician, notes: m.notes, status: m.status,
     next_due_date: m.nextDueDate || null, cost: m.cost,
+    currency: m.currency || 'USD',
   }),
 
   // ---- CRM mirrors ----

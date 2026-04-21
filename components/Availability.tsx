@@ -1,8 +1,8 @@
-import React, { useMemo, useState } from 'react';
-import { getBillboards, getClients, ZIM_TOWNS } from '../services/mockData';
+import React, { useEffect, useMemo, useState } from 'react';
+import { getBillboards, getClients, syncBillboardAvailability, ZIM_TOWNS } from '../services/mockData';
 import { generateAvailabilityReportPDF } from '../services/pdfGenerator';
 import { Billboard, BillboardType } from '../types';
-import { Search, Download, CheckCircle, CircleSlash, Layers, TrendingUp } from 'lucide-react';
+import { AlertTriangle, Search, Download, CheckCircle, CircleSlash, Layers, TrendingUp } from 'lucide-react';
 
 type StatusBucket = 'Available' | 'Partial' | 'Booked';
 
@@ -13,21 +13,28 @@ interface BillboardRow {
     available: number;
     bucket: StatusBucket;
     detail: string;
+    overbooked: boolean;
+    overbookingDetail?: string;
 }
 
 const deriveRow = (b: Billboard, clientName: (id?: string) => string): BillboardRow => {
+    const overbooked = !!b.overbooked;
+    const overbookingDetail = b.overbookingDetail;
     if (b.type === BillboardType.LED) {
         const total = b.totalSlots ?? 0;
         const rented = Math.min(b.rentedSlots ?? 0, total);
         const available = Math.max(0, total - rented);
         const bucket: StatusBucket = rented === 0 ? 'Available' : rented >= total ? 'Booked' : 'Partial';
+        const baseDetail = total > 0 ? `${rented}/${total} slots rented` : 'No slots configured';
         return {
             billboard: b,
             capacity: total,
             rented,
             available,
             bucket,
-            detail: total > 0 ? `${rented}/${total} slots rented` : 'No slots configured',
+            detail: overbooked && overbookingDetail ? `${baseDetail} · ⚠ ${overbookingDetail}` : baseDetail,
+            overbooked,
+            overbookingDetail,
         };
     }
     // Static: 2 sides
@@ -37,13 +44,16 @@ const deriveRow = (b: Billboard, clientName: (id?: string) => string): Billboard
     const bucket: StatusBucket = rented === 0 ? 'Available' : rented === 2 ? 'Booked' : 'Partial';
     const aLabel = b.sideAStatus === 'Rented' ? clientName(b.sideAClientId) : 'Vacant';
     const bLabel = b.sideBStatus === 'Rented' ? clientName(b.sideBClientId) : 'Vacant';
+    const baseDetail = `A: ${aLabel} · B: ${bLabel}`;
     return {
         billboard: b,
         capacity: 2,
         rented,
         available: 2 - rented,
         bucket,
-        detail: `A: ${aLabel} · B: ${bLabel}`,
+        detail: overbooked && overbookingDetail ? `${baseDetail} · ⚠ ${overbookingDetail}` : baseDetail,
+        overbooked,
+        overbookingDetail,
     };
 };
 
@@ -59,8 +69,17 @@ export const Availability: React.FC = () => {
     const [typeFilter, setTypeFilter] = useState<'All' | BillboardType>('All');
     const [statusFilter, setStatusFilter] = useState<'All' | StatusBucket>('All');
 
-    const billboards = getBillboards();
-    const clients = getClients();
+    // Force a re-sync on mount so the screen reflects the latest contract
+    // state — auto-expires stale Active contracts and rebuilds per-side /
+    // per-slot occupancy. [tick] increments after sync to re-read state.
+    const [tick, setTick] = useState(0);
+    useEffect(() => {
+        syncBillboardAvailability();
+        setTick(t => t + 1);
+    }, []);
+
+    const billboards = useMemo(() => getBillboards(), [tick]);
+    const clients = useMemo(() => getClients(), [tick]);
     const clientName = (id?: string) => clients.find(c => c.id === id)?.companyName || 'Unknown';
 
     const rows: BillboardRow[] = useMemo(
@@ -68,7 +87,7 @@ export const Availability: React.FC = () => {
         [billboards, clients],
     );
 
-    const filtered = rows.filter(r => {
+    const filtered = useMemo(() => rows.filter(r => {
         const b = r.billboard;
         const matchesSearch = !searchTerm ||
             b.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -77,40 +96,46 @@ export const Availability: React.FC = () => {
         const matchesType = typeFilter === 'All' || b.type === typeFilter;
         const matchesStatus = statusFilter === 'All' || r.bucket === statusFilter;
         return matchesSearch && matchesTown && matchesType && matchesStatus;
-    });
+    }), [rows, searchTerm, townFilter, typeFilter, statusFilter]);
 
+    // Totals track the visible (filtered) subset — the PDF then matches what
+    // the user sees on-screen. Type splits and town breakdown are also derived
+    // from `filtered` so all on-screen and exported numbers line up.
     const totals = useMemo(() => {
-        const totalCapacity = rows.reduce((s, r) => s + r.capacity, 0);
-        const totalRented = rows.reduce((s, r) => s + r.rented, 0);
+        const totalCapacity = filtered.reduce((s, r) => s + r.capacity, 0);
+        const totalRented = filtered.reduce((s, r) => s + r.rented, 0);
         const totalAvailable = totalCapacity - totalRented;
         const occupancy = totalCapacity > 0 ? (totalRented / totalCapacity) * 100 : 0;
 
-        const staticRows = rows.filter(r => r.billboard.type === BillboardType.Static);
-        const ledRows = rows.filter(r => r.billboard.type === BillboardType.LED);
+        const staticRows = filtered.filter(r => r.billboard.type === BillboardType.Static);
+        const ledRows = filtered.filter(r => r.billboard.type === BillboardType.LED);
         const staticCap = staticRows.reduce((s, r) => s + r.capacity, 0);
         const staticRented = staticRows.reduce((s, r) => s + r.rented, 0);
         const ledCap = ledRows.reduce((s, r) => s + r.capacity, 0);
         const ledRented = ledRows.reduce((s, r) => s + r.rented, 0);
 
+        const overbookedCount = filtered.filter(r => r.overbooked).length;
+
         return {
             totalCapacity, totalRented, totalAvailable, occupancy,
             staticCap, staticRented, staticAvailable: staticCap - staticRented,
             ledCap, ledRented, ledAvailable: ledCap - ledRented,
-            billboards: rows.length,
+            billboards: filtered.length,
+            overbookedCount,
         };
-    }, [rows]);
+    }, [filtered]);
 
-    // Per-town breakdown — sorted by most capacity first.
+    // Per-town breakdown — sorted by most capacity first. Follows `filtered`.
     const townBreakdown = useMemo(() => {
         const map = new Map<string, { town: string; capacity: number; rented: number }>();
-        for (const r of rows) {
+        for (const r of filtered) {
             const cur = map.get(r.billboard.town) || { town: r.billboard.town, capacity: 0, rented: 0 };
             cur.capacity += r.capacity;
             cur.rented += r.rented;
             map.set(r.billboard.town, cur);
         }
         return [...map.values()].sort((a, b) => b.capacity - a.capacity);
-    }, [rows]);
+    }, [filtered]);
 
     const handleDownload = () => {
         generateAvailabilityReportPDF(filtered.map(r => ({
@@ -120,13 +145,14 @@ export const Availability: React.FC = () => {
             capacity: r.capacity,
             rented: r.rented,
             available: r.available,
-            status: bucketStyles[r.bucket].label,
+            status: r.overbooked ? 'Overbooked' : bucketStyles[r.bucket].label,
             detail: r.detail,
         })), {
             totalCapacity: totals.totalCapacity,
             totalRented: totals.totalRented,
             totalAvailable: totals.totalAvailable,
             occupancy: totals.occupancy,
+            overbookedCount: totals.overbookedCount,
         }, townBreakdown);
     };
 
@@ -189,10 +215,19 @@ export const Availability: React.FC = () => {
                     <div>
                         <p className="text-xs font-bold uppercase text-slate-400">Occupancy</p>
                         <h3 className="text-2xl font-black text-slate-900">{totals.occupancy.toFixed(1)}%</h3>
-                        <p className="text-[11px] text-slate-400 mt-0.5">fleet-wide utilisation</p>
+                        <p className="text-[11px] text-slate-400 mt-0.5">current selection</p>
                     </div>
                 </div>
             </div>
+
+            {totals.overbookedCount > 0 && (
+                <div className="flex items-center gap-3 px-4 py-3 rounded-2xl border border-rose-200 bg-rose-50 text-rose-800">
+                    <AlertTriangle size={18} />
+                    <p className="text-sm font-medium">
+                        <span className="font-bold">{totals.overbookedCount}</span> asset{totals.overbookedCount === 1 ? '' : 's'} overbooked — two or more active contracts claim the same side or slot. Review the flagged rows below.
+                    </p>
+                </div>
+            )}
 
             {/* Type split + town breakdown */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -287,8 +322,17 @@ export const Availability: React.FC = () => {
                             {filtered.map(r => {
                                 const style = bucketStyles[r.bucket];
                                 return (
-                                    <tr key={r.billboard.id} className="hover:bg-slate-50 transition-colors">
-                                        <td className="px-6 py-4 font-bold text-slate-900">{r.billboard.name}</td>
+                                    <tr key={r.billboard.id} className={`transition-colors ${r.overbooked ? 'bg-rose-50/40 hover:bg-rose-50' : 'hover:bg-slate-50'}`}>
+                                        <td className="px-6 py-4 font-bold text-slate-900">
+                                            <span className="inline-flex items-center gap-2">
+                                                {r.billboard.name}
+                                                {r.overbooked && (
+                                                    <span title={r.overbookingDetail} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-rose-100 text-rose-700">
+                                                        <AlertTriangle size={10} /> Overbooked
+                                                    </span>
+                                                )}
+                                            </span>
+                                        </td>
                                         <td className="px-6 py-4">{r.billboard.location}, {r.billboard.town}</td>
                                         <td className="px-6 py-4">
                                             <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${r.billboard.type === BillboardType.LED ? 'bg-indigo-50 text-indigo-700' : 'bg-orange-50 text-orange-700'}`}>

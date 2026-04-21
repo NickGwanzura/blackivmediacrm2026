@@ -1,7 +1,8 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Billboard, BillboardType, Client, Contract } from '../types';
-import { getBillboards, addBillboard, updateBillboard, deleteBillboard, mockClients, ZIM_TOWNS, getClients, updateClient, bulkAddBillboards, bulkAddClients, bulkAddContracts, bulkUpdateBillboards } from '../services/mockData';
+import { Billboard, BillboardType, Client, Contract, Currency, CURRENCIES } from '../types';
+import { getBillboards, addBillboard, updateBillboard, deleteBillboard, mockClients, ZIM_TOWNS, getClients, updateClient, bulkAddBillboards, bulkAddClients, bulkAddContracts, bulkUpdateBillboards, getDefaultCurrency } from '../services/mockData';
+import { formatCurrency } from '../utils/sanitizers';
 import { estimateLocationDetails } from '../services/aiService';
 import { MapPin, X, Edit2, Plus, Image as ImageIcon, Map as MapIcon, Grid as GridIcon, Trash2, Share2, Eye, EyeOff, Copy, List as ListIcon, Search, Link2, FileUp, FileDown, Sparkles, Loader2, Filter, Check, RefreshCw, RectangleHorizontal } from 'lucide-react';
 import L from 'leaflet';
@@ -80,9 +81,9 @@ const BillboardCard: React.FC<BillboardCardProps> = ({ billboard, onEdit, onDele
             <div className="grid grid-cols-2 gap-y-6 gap-x-4 mb-6">
                 <div><p className="text-[10px] uppercase tracking-wider text-slate-400 font-bold mb-1">Dimensions</p><p className="text-sm font-bold text-slate-800">{billboard.width}m x {billboard.height}m</p></div>
                 {billboard.type === BillboardType.Static ? (
-                <div><p className="text-[10px] uppercase tracking-wider text-slate-400 font-bold mb-1">Monthly Rates</p><div className="text-sm font-bold text-slate-800"><span className="text-xs text-slate-400 mr-1 font-normal">A:</span>${billboard.sideARate?.toLocaleString()}<span className="mx-2 text-slate-300">|</span><span className="text-xs text-slate-400 mr-1 font-normal">B:</span>${billboard.sideBRate?.toLocaleString()}</div></div>
+                <div><p className="text-[10px] uppercase tracking-wider text-slate-400 font-bold mb-1">Monthly Rates</p><div className="text-sm font-bold text-slate-800"><span className="text-xs text-slate-400 mr-1 font-normal">A:</span>{formatCurrency(billboard.sideARate ?? 0, billboard.currency)}<span className="mx-2 text-slate-300">|</span><span className="text-xs text-slate-400 mr-1 font-normal">B:</span>{formatCurrency(billboard.sideBRate ?? 0, billboard.currency)}</div></div>
                 ) : (
-                <div><p className="text-[10px] uppercase tracking-wider text-slate-400 font-bold mb-1">Rate / Slot</p><p className="text-sm font-bold text-slate-800">${billboard.ratePerSlot?.toLocaleString()} <span className="text-[10px] text-slate-400 font-normal">/mo</span></p></div>
+                <div><p className="text-[10px] uppercase tracking-wider text-slate-400 font-bold mb-1">Rate / Slot</p><p className="text-sm font-bold text-slate-800">{formatCurrency(billboard.ratePerSlot ?? 0, billboard.currency)} <span className="text-[10px] text-slate-400 font-normal">/mo</span></p></div>
                 )}
             </div>
             
@@ -156,7 +157,8 @@ export const BillboardList: React.FC<BillboardListProps> = ({ readOnly = false }
     name: '', location: '', town: 'Harare', type: BillboardType.Static, width: 0, height: 0,
     sideARate: 0, sideBRate: 0, ratePerSlot: 0, totalSlots: 10, imageUrl: '', visibility: '',
     coordinates: { lat: -17.8292, lng: 31.0522 },
-    sideAStatus: 'Available', sideBStatus: 'Available', rentedSlots: 0
+    sideAStatus: 'Available', sideBStatus: 'Available', rentedSlots: 0,
+    currency: getDefaultCurrency()
   });
 
   // Deep Link Handling
@@ -295,23 +297,24 @@ export const BillboardList: React.FC<BillboardListProps> = ({ readOnly = false }
   const handleAddBillboard = (e: React.FormEvent) => {
     e.preventDefault();
     const billboard: Billboard = {
-      id: (Date.now()).toString(), 
-      name: newBillboard.name!, 
-      location: newBillboard.location!, 
-      town: newBillboard.town || 'Harare', 
-      type: newBillboard.type!, 
-      width: newBillboard.width!, 
+      id: (Date.now()).toString(),
+      name: newBillboard.name!,
+      location: newBillboard.location!,
+      town: newBillboard.town || 'Harare',
+      type: newBillboard.type!,
+      width: newBillboard.width!,
       height: newBillboard.height!,
-      sideARate: newBillboard.sideARate, 
-      sideBRate: newBillboard.sideBRate, 
-      ratePerSlot: newBillboard.ratePerSlot, 
-      totalSlots: newBillboard.totalSlots, 
+      sideARate: newBillboard.sideARate,
+      sideBRate: newBillboard.sideBRate,
+      ratePerSlot: newBillboard.ratePerSlot,
+      totalSlots: newBillboard.totalSlots,
       rentedSlots: newBillboard.rentedSlots || 0,
-      sideAStatus: newBillboard.sideAStatus as any || 'Available', 
-      sideBStatus: newBillboard.sideBStatus as any || 'Available', 
-      imageUrl: newBillboard.imageUrl, 
-      visibility: newBillboard.visibility, 
-      coordinates: newBillboard.coordinates || { lat: -17.82, lng: 31.05 }
+      sideAStatus: newBillboard.sideAStatus as any || 'Available',
+      sideBStatus: newBillboard.sideBStatus as any || 'Available',
+      imageUrl: newBillboard.imageUrl,
+      visibility: newBillboard.visibility,
+      coordinates: newBillboard.coordinates || { lat: -17.82, lng: 31.05 },
+      currency: newBillboard.currency || getDefaultCurrency()
     };
     addBillboard(billboard);
     setBillboards([...getBillboards()]);
@@ -321,7 +324,8 @@ export const BillboardList: React.FC<BillboardListProps> = ({ readOnly = false }
       name: '', location: '', town: 'Harare', type: BillboardType.Static,
       width: 0, height: 0, sideARate: 0, sideBRate: 0, ratePerSlot: 0,
       totalSlots: 10, imageUrl: '', visibility: '', coordinates: { lat: -17.8292, lng: 31.0522 },
-      sideAStatus: 'Available', sideBStatus: 'Available', rentedSlots: 0
+      sideAStatus: 'Available', sideBStatus: 'Available', rentedSlots: 0,
+      currency: getDefaultCurrency()
     });
   };
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>, isEdit: boolean) => {
@@ -568,7 +572,7 @@ export const BillboardList: React.FC<BillboardListProps> = ({ readOnly = false }
                   <div className="overflow-x-auto">
                       <table className="w-full text-left text-sm text-slate-600 min-w-[800px]">
                           <thead className="bg-slate-50/80 border-b border-slate-200 sticky top-0 z-10 backdrop-blur-md"><tr><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider w-16"><Checkbox checked={selectedIds.length === filteredBillboards.length && filteredBillboards.length > 0} onChange={handleSelectAll} /></th><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider">Asset</th><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider">Location</th><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider">Type</th><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider">Status</th><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider">Rate</th><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider text-right">Actions</th></tr></thead>
-                          <tbody className="divide-y divide-slate-100">{filteredBillboards.map(b => (<tr key={b.id} className="hover:bg-indigo-50/30 transition-colors"><td className="px-6 py-4"><Checkbox checked={selectedIds.includes(b.id)} onChange={() => handleSelect(b.id)} /></td><td className="px-6 py-4 flex items-center gap-4"><div className="w-14 h-14 rounded-xl bg-slate-100 overflow-hidden shrink-0 border border-slate-200 shadow-sm">{b.imageUrl ? <img src={b.imageUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-slate-300"><ImageIcon size={20}/></div>}</div><span className="font-bold text-slate-900 text-base">{b.name}</span></td><td className="px-6 py-4"><div className="text-slate-800 font-bold">{b.town}</div><div className="text-xs text-slate-500 font-medium">{b.location}</div></td><td className="px-6 py-4"><span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider ${b.type === 'LED' ? 'bg-indigo-100 text-indigo-700' : 'bg-orange-100 text-orange-700'}`}>{b.type}</span></td><td className="px-6 py-4">{b.type === BillboardType.Static ? (<div className="flex gap-2"><div className={`px-2.5 py-1 rounded-lg text-xs font-bold ${b.sideAStatus === 'Available' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>A</div><div className={`px-2.5 py-1 rounded-lg text-xs font-bold ${b.sideBStatus === 'Available' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>B</div></div>) : (<div className="flex items-center gap-2"><div className="h-2 w-20 bg-slate-100 rounded-full overflow-hidden border border-slate-200"><div className="h-full bg-gradient-to-r from-indigo-500 to-violet-500" style={{width: `${(b.rentedSlots! / b.totalSlots!) * 100}%`}}></div></div><span className="text-xs font-bold">{b.rentedSlots}/{b.totalSlots}</span></div>)}</td><td className="px-6 py-4 font-mono text-xs font-bold text-slate-700">{b.type === BillboardType.Static ? `$${b.sideARate} | $${b.sideBRate}` : `$${b.ratePerSlot}/slot`}</td><td className="px-6 py-4 text-right"><div className="flex justify-end gap-2">{!readOnly && <button onClick={() => setEditingBillboard(b)} className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-all"><Edit2 size={16}/></button>}<button onClick={() => shareBillboard(b)} className="p-2 text-indigo-400 hover:text-indigo-900 hover:bg-indigo-50 rounded-xl transition-all"><Link2 size={16}/></button>{!readOnly && <button onClick={() => setBillboardToDelete(b)} className="p-2 text-rose-400 hover:text-rose-900 hover:bg-rose-50 rounded-xl transition-all"><Trash2 size={16}/></button>}</div></td></tr>))}</tbody></table></div></div>
+                          <tbody className="divide-y divide-slate-100">{filteredBillboards.map(b => (<tr key={b.id} className="hover:bg-indigo-50/30 transition-colors"><td className="px-6 py-4"><Checkbox checked={selectedIds.includes(b.id)} onChange={() => handleSelect(b.id)} /></td><td className="px-6 py-4 flex items-center gap-4"><div className="w-14 h-14 rounded-xl bg-slate-100 overflow-hidden shrink-0 border border-slate-200 shadow-sm">{b.imageUrl ? <img src={b.imageUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-slate-300"><ImageIcon size={20}/></div>}</div><span className="font-bold text-slate-900 text-base">{b.name}</span></td><td className="px-6 py-4"><div className="text-slate-800 font-bold">{b.town}</div><div className="text-xs text-slate-500 font-medium">{b.location}</div></td><td className="px-6 py-4"><span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider ${b.type === 'LED' ? 'bg-indigo-100 text-indigo-700' : 'bg-orange-100 text-orange-700'}`}>{b.type}</span></td><td className="px-6 py-4">{b.type === BillboardType.Static ? (<div className="flex gap-2"><div className={`px-2.5 py-1 rounded-lg text-xs font-bold ${b.sideAStatus === 'Available' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>A</div><div className={`px-2.5 py-1 rounded-lg text-xs font-bold ${b.sideBStatus === 'Available' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>B</div></div>) : (<div className="flex items-center gap-2"><div className="h-2 w-20 bg-slate-100 rounded-full overflow-hidden border border-slate-200"><div className="h-full bg-gradient-to-r from-indigo-500 to-violet-500" style={{width: `${(b.rentedSlots! / b.totalSlots!) * 100}%`}}></div></div><span className="text-xs font-bold">{b.rentedSlots}/{b.totalSlots}</span></div>)}</td><td className="px-6 py-4 font-mono text-xs font-bold text-slate-700">{b.type === BillboardType.Static ? `${formatCurrency(b.sideARate ?? 0, b.currency)} | ${formatCurrency(b.sideBRate ?? 0, b.currency)}` : `${formatCurrency(b.ratePerSlot ?? 0, b.currency)}/slot`}</td><td className="px-6 py-4 text-right"><div className="flex justify-end gap-2">{!readOnly && <button onClick={() => setEditingBillboard(b)} className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-all"><Edit2 size={16}/></button>}<button onClick={() => shareBillboard(b)} className="p-2 text-indigo-400 hover:text-indigo-900 hover:bg-indigo-50 rounded-xl transition-all"><Link2 size={16}/></button>{!readOnly && <button onClick={() => setBillboardToDelete(b)} className="p-2 text-rose-400 hover:text-rose-900 hover:bg-rose-50 rounded-xl transition-all"><Trash2 size={16}/></button>}</div></td></tr>))}</tbody></table></div></div>
           ) : (
             <div className="pb-8 overflow-y-auto max-h-full pr-2">
                 {(filter === 'All' || filter === 'LED') && ledBoards.length > 0 && (<div className="mb-12"><h3 className="text-2xl font-bold text-slate-900 mb-6 flex items-center gap-3"><span className="w-1.5 h-8 bg-gradient-to-b from-indigo-500 to-violet-600 rounded-full shadow-lg shadow-indigo-500/30"></span>Digital Inventory <span className="text-sm font-bold text-slate-500 bg-white border border-slate-200 px-3 py-1 rounded-lg ml-2 shadow-sm">{ledBoards.length}</span></h3><div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">{ledBoards.map(billboard => (<BillboardCard key={billboard.id} billboard={billboard} onEdit={setEditingBillboard} onDelete={setBillboardToDelete} getClientName={getClientName} onShare={shareBillboard} selected={selectedIds.includes(billboard.id)} onSelect={handleSelect} readOnly={readOnly} />))}</div></div>)}
@@ -676,6 +680,7 @@ export const BillboardList: React.FC<BillboardListProps> = ({ readOnly = false }
               </button>
             </div>
             <MinimalSelect label="Type" value={newBillboard.type} onChange={(e: any) => setNewBillboard({...newBillboard, type: e.target.value})} options={[{ value: BillboardType.Static, label: 'Static (Side A/B)' }, { value: BillboardType.LED, label: 'LED (Slots)' }]}/>
+            <MinimalSelect label="Currency" value={newBillboard.currency || getDefaultCurrency()} onChange={(e: any) => setNewBillboard({...newBillboard, currency: e.target.value as Currency})} options={CURRENCIES.map(c => ({ value: c, label: c }))}/>
             <MinimalTextArea label="Visibility & Traffic Analysis" value={newBillboard.visibility || ''} onChange={(e: any) => setNewBillboard({...newBillboard, visibility: e.target.value})}/>
           </div>
           <div className="space-y-6">
@@ -698,8 +703,8 @@ export const BillboardList: React.FC<BillboardListProps> = ({ readOnly = false }
               <div className="space-y-4 pt-2">
                 <p className="text-xs font-bold uppercase text-slate-400 tracking-wider">Monthly Rates</p>
                 <div className="grid grid-cols-2 gap-4">
-                  <MinimalInput label="Side A Rate ($)" type="number" value={newBillboard.sideARate} onChange={(e: any) => setNewBillboard({...newBillboard, sideARate: Number(e.target.value)})} />
-                  <MinimalInput label="Side B Rate ($)" type="number" value={newBillboard.sideBRate} onChange={(e: any) => setNewBillboard({...newBillboard, sideBRate: Number(e.target.value)})} />
+                  <MinimalInput label={`Side A Rate (${newBillboard.currency || getDefaultCurrency()})`} type="number" value={newBillboard.sideARate} onChange={(e: any) => setNewBillboard({...newBillboard, sideARate: Number(e.target.value)})} />
+                  <MinimalInput label={`Side B Rate (${newBillboard.currency || getDefaultCurrency()})`} type="number" value={newBillboard.sideBRate} onChange={(e: any) => setNewBillboard({...newBillboard, sideBRate: Number(e.target.value)})} />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <MinimalSelect label="Side A Status" value={newBillboard.sideAStatus} onChange={(e: any) => setNewBillboard({...newBillboard, sideAStatus: e.target.value})} options={[{value: 'Available', label: 'Available'}, {value: 'Rented', label: 'Rented'}]}/>
@@ -711,7 +716,7 @@ export const BillboardList: React.FC<BillboardListProps> = ({ readOnly = false }
                 <p className="text-xs font-bold uppercase text-slate-400 tracking-wider">LED Configuration</p>
                 <div className="grid grid-cols-2 gap-4">
                   <MinimalInput label="Total Slots" type="number" value={newBillboard.totalSlots} onChange={(e: any) => setNewBillboard({...newBillboard, totalSlots: Number(e.target.value)})} />
-                  <MinimalInput label="Rate / Slot ($)" type="number" value={newBillboard.ratePerSlot} onChange={(e: any) => setNewBillboard({...newBillboard, ratePerSlot: Number(e.target.value)})} />
+                  <MinimalInput label={`Rate / Slot (${newBillboard.currency || getDefaultCurrency()})`} type="number" value={newBillboard.ratePerSlot} onChange={(e: any) => setNewBillboard({...newBillboard, ratePerSlot: Number(e.target.value)})} />
                 </div>
                 <MinimalInput label="Initially Rented Slots" type="number" value={newBillboard.rentedSlots} onChange={(e: any) => setNewBillboard({...newBillboard, rentedSlots: Number(e.target.value)})} />
               </div>
@@ -773,6 +778,7 @@ export const BillboardList: React.FC<BillboardListProps> = ({ readOnly = false }
                 }}
                 options={[{ value: BillboardType.Static, label: 'Static (Side A/B)' }, { value: BillboardType.LED, label: 'LED (Slots)' }]}
               />
+              <MinimalSelect label="Currency" value={editingBillboard.currency || getDefaultCurrency()} onChange={(e: any) => setEditingBillboard({...editingBillboard, currency: e.target.value as Currency})} options={CURRENCIES.map(c => ({ value: c, label: c }))}/>
               <MinimalTextArea label="Visibility & Traffic Analysis" value={editingBillboard.visibility || ''} onChange={(e: any) => setEditingBillboard({...editingBillboard, visibility: e.target.value})}/>
             </div>
             <div className="space-y-6">
@@ -795,8 +801,8 @@ export const BillboardList: React.FC<BillboardListProps> = ({ readOnly = false }
                 <div className="space-y-4 pt-2">
                   <p className="text-xs font-bold uppercase text-slate-400 tracking-wider">Monthly Rates</p>
                   <div className="grid grid-cols-2 gap-4">
-                    <MinimalInput label="Side A Rate ($)" type="number" value={editingBillboard.sideARate} onChange={(e: any) => setEditingBillboard({...editingBillboard, sideARate: Number(e.target.value)})} />
-                    <MinimalInput label="Side B Rate ($)" type="number" value={editingBillboard.sideBRate} onChange={(e: any) => setEditingBillboard({...editingBillboard, sideBRate: Number(e.target.value)})} />
+                    <MinimalInput label={`Side A Rate (${editingBillboard.currency || getDefaultCurrency()})`} type="number" value={editingBillboard.sideARate} onChange={(e: any) => setEditingBillboard({...editingBillboard, sideARate: Number(e.target.value)})} />
+                    <MinimalInput label={`Side B Rate (${editingBillboard.currency || getDefaultCurrency()})`} type="number" value={editingBillboard.sideBRate} onChange={(e: any) => setEditingBillboard({...editingBillboard, sideBRate: Number(e.target.value)})} />
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <MinimalSelect label="Side A Status" value={editingBillboard.sideAStatus} onChange={(e: any) => setEditingBillboard({...editingBillboard, sideAStatus: e.target.value})} options={[{value: 'Available', label: 'Available'}, {value: 'Rented', label: 'Rented'}]}/>
@@ -808,7 +814,7 @@ export const BillboardList: React.FC<BillboardListProps> = ({ readOnly = false }
                   <p className="text-xs font-bold uppercase text-slate-400 tracking-wider">LED Configuration</p>
                   <div className="grid grid-cols-2 gap-4">
                     <MinimalInput label="Total Slots" type="number" value={editingBillboard.totalSlots} onChange={(e: any) => setEditingBillboard({...editingBillboard, totalSlots: Number(e.target.value)})} />
-                    <MinimalInput label="Rate / Slot ($)" type="number" value={editingBillboard.ratePerSlot} onChange={(e: any) => setEditingBillboard({...editingBillboard, ratePerSlot: Number(e.target.value)})} />
+                    <MinimalInput label={`Rate / Slot (${editingBillboard.currency || getDefaultCurrency()})`} type="number" value={editingBillboard.ratePerSlot} onChange={(e: any) => setEditingBillboard({...editingBillboard, ratePerSlot: Number(e.target.value)})} />
                   </div>
                   <MinimalInput label="Rented Slots" type="number" value={editingBillboard.rentedSlots} onChange={(e: any) => setEditingBillboard({...editingBillboard, rentedSlots: Number(e.target.value)})} />
                 </div>

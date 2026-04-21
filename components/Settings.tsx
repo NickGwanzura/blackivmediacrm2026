@@ -4,7 +4,8 @@ import { useToast } from './Toast';
 import { getUsers, addUser, updateUser, deleteUser, getAuditLogs, fetchServerAuditLogs, getCompanyLogo, setCompanyLogo, getCompanyProfile, updateCompanyProfile, RELEASE_NOTES, resetSystemData, createSystemBackup, restoreSystemBackup, getLastManualBackupDate, getAutoBackupStatus, getStorageUsage, recordCloudSync, getLastCloudSyncDate, pullFromRemote, getLastSyncedAt } from '../services/mockData';
 import { generateFeaturesPDF } from '../services/pdfGenerator';
 import { getCurrentUser, approveUser as approveUserApi, inviteUser as inviteUserApi, requestPasswordReset } from '../services/authService';
-import { Shield, Download, Phone, MapPin, Edit2, Trash2, AlertTriangle, Cloud, Upload, History, RefreshCw, Database, FileUp, FileDown, Clock, HardDrive, BookOpen, Loader2, Smartphone, Monitor, UserCheck, Mail, Send, KeyRound, Building, ScrollText, Lock, UserPlus, UserCog } from 'lucide-react';
+import { Shield, Download, Phone, MapPin, Edit2, Trash2, AlertTriangle, Cloud, Upload, History, RefreshCw, Database, FileUp, FileDown, Clock, HardDrive, BookOpen, Loader2, Smartphone, Monitor, UserCheck, Mail, Send, KeyRound, Building, ScrollText, Lock, UserPlus, UserCog, Megaphone, CheckCircle2 } from 'lucide-react';
+import { broadcastAnnouncement, buildDualCurrencyAnnouncement, BroadcastResult } from '../services/emailService';
 import { AccessibleModal, ModalButton } from './ui/AccessibleModal';
 import { User as UserType, CompanyProfile } from '../types';
 
@@ -79,6 +80,51 @@ export const Settings: React.FC = () => {
   // ops owns the deployment via Railway env vars.
   const [isPulling, setIsPulling] = useState(false);
   const [lastSynced, setLastSynced] = useState<string | null>(getLastSyncedAt());
+
+  // Staff announcement broadcast — admin-only. Sends a single pre-composed
+  // update (e.g. the dual-currency rollout) to every Active user with an
+  // email. See services/emailService.ts → broadcastAnnouncement.
+  const [isAnnouncementPreviewOpen, setIsAnnouncementPreviewOpen] = useState(false);
+  const [isAnnouncementConfirmOpen, setIsAnnouncementConfirmOpen] = useState(false);
+  const [announcementSending, setAnnouncementSending] = useState(false);
+  const [announcementResult, setAnnouncementResult] = useState<BroadcastResult | null>(null);
+
+  // Staff recipients: active users with a real email. We exclude Pending /
+  // Denied accounts (they shouldn't be notified of feature work until they
+  // have access) and anything without an email address.
+  const announcementRecipients = useMemo(() => {
+    return users
+      .filter(u => (u.status || 'Active') === 'Active' && !!u.email)
+      .map(u => ({ email: u.email, name: `${u.firstName || ''} ${u.lastName || ''}`.trim() }));
+  }, [users]);
+
+  const announcementContent = useMemo(() => buildDualCurrencyAnnouncement(), []);
+
+  const runAnnouncementBroadcast = async () => {
+    setAnnouncementSending(true);
+    setAnnouncementResult(null);
+    try {
+      const result = await broadcastAnnouncement(
+        announcementRecipients,
+        announcementContent.subject,
+        announcementContent.html,
+        announcementContent.text,
+      );
+      setAnnouncementResult(result);
+      if (result.failed.length === 0) {
+        toast.success(`Sent to ${result.sent.length} staff.`);
+      } else if (result.sent.length === 0) {
+        toast.error(`Broadcast failed for all ${result.failed.length} recipients.`);
+      } else {
+        toast.warning(`Sent to ${result.sent.length}; ${result.failed.length} failed.`);
+      }
+    } catch (e: any) {
+      toast.error(`Broadcast error: ${e?.message || 'unknown'}`);
+    } finally {
+      setAnnouncementSending(false);
+      setIsAnnouncementConfirmOpen(false);
+    }
+  };
 
   // Audit logs are now server-authoritative. Fetch the most recent 500 from
   // /audit/log (Admin-only endpoint) when the Audit tab opens; fall back to
@@ -401,6 +447,21 @@ export const Settings: React.FC = () => {
                     </div>
                   </div>
                 </div>
+                <div className="border-t border-slate-50 pt-6">
+                  <h4 className="text-xs font-bold uppercase text-slate-400 tracking-wider mb-2">Default Currency</h4>
+                  <p className="text-xs text-slate-500 mb-6">Currency pre-selected when creating billboards, expenses, and ad-hoc invoices. Existing rows keep the currency they were saved with; dashboards always split totals per currency.</p>
+                  <div className="max-w-xs">
+                    <MinimalSelect
+                      label="Default Currency"
+                      value={profile.defaultCurrency || 'USD'}
+                      onChange={e => updateProfileField('defaultCurrency', e.target.value as CompanyProfile['defaultCurrency'])}
+                      options={[
+                        { value: 'USD', label: 'USD — US Dollar' },
+                        { value: 'ZWG', label: 'ZWG — Zimbabwe Gold' },
+                      ]}
+                    />
+                  </div>
+                </div>
               </div>
               <div className="mt-8 flex justify-end pt-4 border-t border-slate-50">
                 <button onClick={handleSaveCompanyDetails} disabled={!profileDirty} className="px-8 py-3 bg-slate-900 text-white rounded-xl text-sm font-bold uppercase tracking-wider hover:bg-slate-800 shadow-lg shadow-slate-900/20 transition-all hover:scale-105 disabled:opacity-40 disabled:hover:bg-slate-900 disabled:hover:scale-100 disabled:cursor-not-allowed">Save Changes</button>
@@ -627,6 +688,50 @@ export const Settings: React.FC = () => {
                         <p className="text-slate-500">System updates and changelog history</p>
                     </div>
                 </div>
+
+                {isAdmin && (
+                    <div className="bg-gradient-to-br from-indigo-50 via-white to-white rounded-2xl border border-indigo-100 p-6 shadow-sm">
+                        <div className="flex items-start justify-between gap-4 flex-wrap">
+                            <div className="flex items-start gap-4 min-w-0">
+                                <div className="p-3 bg-white rounded-2xl text-indigo-600 shadow-sm border border-indigo-100 shrink-0"><Megaphone size={22} /></div>
+                                <div className="min-w-0">
+                                    <h4 className="text-base font-bold text-slate-900">Broadcast staff announcement</h4>
+                                    <p className="text-sm text-slate-500 mt-1">Emails every active staff account the pre-written dual-currency update. One email per recipient via Resend — clients are <strong>not</strong> included.</p>
+                                    <div className="flex flex-wrap gap-2 mt-3 text-xs">
+                                        <span className="px-2.5 py-1 rounded-full bg-white border border-slate-200 text-slate-600 font-bold uppercase tracking-wider">{announcementRecipients.length} recipient{announcementRecipients.length === 1 ? '' : 's'}</span>
+                                        <span className="px-2.5 py-1 rounded-full bg-white border border-slate-200 text-slate-600 font-bold uppercase tracking-wider">Subject: Dual-currency support is live</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="flex gap-2 shrink-0">
+                                <button onClick={() => setIsAnnouncementPreviewOpen(true)} className="px-4 py-2 text-sm font-bold uppercase tracking-wider text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors">Preview</button>
+                                <button
+                                    onClick={() => setIsAnnouncementConfirmOpen(true)}
+                                    disabled={announcementRecipients.length === 0 || announcementSending}
+                                    className="px-4 py-2 text-sm font-bold uppercase tracking-wider text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 shadow-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+                                >
+                                    {announcementSending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                                    {announcementSending ? 'Sending…' : 'Send Announcement'}
+                                </button>
+                            </div>
+                        </div>
+                        {announcementResult && (
+                            <div className="mt-5 p-4 rounded-xl bg-white border border-slate-100">
+                                <div className="flex items-center gap-2 mb-2 text-sm font-bold text-slate-800">
+                                    <CheckCircle2 size={16} className="text-emerald-500" />
+                                    Last broadcast: {announcementResult.sent.length} sent · {announcementResult.failed.length} failed · {announcementResult.total} total
+                                </div>
+                                {announcementResult.failed.length > 0 && (
+                                    <ul className="text-xs text-rose-600 space-y-1 mt-2 max-h-40 overflow-y-auto">
+                                        {announcementResult.failed.map((f, i) => (
+                                            <li key={i} className="font-mono">{f.email}: {f.message}</li>
+                                        ))}
+                                    </ul>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                )}
                 
                 {/* Scrollable Container Added Here */}
                 <div className="relative border-l-2 border-slate-200 ml-3 space-y-12 pb-12 max-h-[600px] overflow-y-auto pr-4 scrollbar-thin scrollbar-thumb-slate-200">
@@ -788,6 +893,69 @@ export const Settings: React.FC = () => {
               placeholder="RESET"
             />
           </div>
+        </div>
+      </AccessibleModal>
+
+      {/* Announcement preview: renders the actual HTML that will be emailed
+          so admins can review before firing. No network activity here. */}
+      <AccessibleModal
+        isOpen={isAnnouncementPreviewOpen}
+        onClose={() => setIsAnnouncementPreviewOpen(false)}
+        title="Announcement preview"
+        description={announcementContent.subject}
+        size="lg"
+        icon={<Megaphone size={20} />}
+        mobileLayout="sheet"
+        footer={
+          <>
+            <ModalButton variant="secondary" onClick={() => setIsAnnouncementPreviewOpen(false)}>Close</ModalButton>
+            <ModalButton variant="primary" onClick={() => { setIsAnnouncementPreviewOpen(false); setIsAnnouncementConfirmOpen(true); }}>
+              <Send size={14} className="mr-1.5" /> Continue to send
+            </ModalButton>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <div className="text-xs text-slate-500 font-bold uppercase tracking-wider">Recipients</div>
+          <div className="text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-xl p-3 max-h-40 overflow-y-auto">
+            {announcementRecipients.length === 0 ? (
+              <span className="text-slate-400 italic">No active staff with email addresses on file.</span>
+            ) : (
+              <ul className="space-y-1 font-mono text-xs">
+                {announcementRecipients.map((r, i) => (
+                  <li key={i}>{r.email}{r.name ? ` — ${r.name}` : ''}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <div className="text-xs text-slate-500 font-bold uppercase tracking-wider pt-2">Body</div>
+          <div className="border border-slate-200 rounded-xl p-4 bg-white max-h-[420px] overflow-y-auto" dangerouslySetInnerHTML={{ __html: announcementContent.html }} />
+        </div>
+      </AccessibleModal>
+
+      {/* Explicit confirm — sending is irreversible once Resend accepts. */}
+      <AccessibleModal
+        isOpen={isAnnouncementConfirmOpen}
+        onClose={() => !announcementSending && setIsAnnouncementConfirmOpen(false)}
+        title={`Send to ${announcementRecipients.length} staff?`}
+        description="One email per recipient via Resend. This cannot be undone."
+        size="sm"
+        variant="default"
+        icon={<Send size={20} />}
+        preventClose={announcementSending}
+        closeOnOverlayClick={!announcementSending}
+        footer={
+          <>
+            <ModalButton variant="secondary" onClick={() => setIsAnnouncementConfirmOpen(false)} disabled={announcementSending}>Cancel</ModalButton>
+            <ModalButton variant="primary" onClick={runAnnouncementBroadcast} loading={announcementSending} disabled={announcementRecipients.length === 0}>
+              {announcementSending ? 'Sending…' : `Send now`}
+            </ModalButton>
+          </>
+        }
+      >
+        <div className="text-sm text-slate-600 space-y-2">
+          <p>Subject: <strong className="text-slate-900">{announcementContent.subject}</strong></p>
+          <p className="text-xs text-slate-500">Per-recipient success and failure will be shown after the broadcast completes. If any addresses bounce you can resend individually from the failures list.</p>
         </div>
       </AccessibleModal>
     </>
