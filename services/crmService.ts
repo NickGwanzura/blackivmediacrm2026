@@ -41,24 +41,17 @@ const CRM_COLLECTION: Record<string, string> = {
   callLogs: 'crmCallLogs',
 };
 
-const API_URL_KEY = 'bi_api_url';
-const API_KEY_KEY = 'bi_api_key';
-const getApiBase = () => localStorage.getItem(API_URL_KEY) ?? '';
-const getApiAuthHeader = (): Record<string, string> => {
-  const k = localStorage.getItem(API_KEY_KEY);
-  return k ? { Authorization: `Bearer ${k}` } : {};
-};
+// All CRM sync endpoints are same-origin on the co-deployed Express server;
+// auth comes from the HTTP-only session cookie (credentials: 'include').
 
-// Push the entire collection to /sync. Triggered after every mutation via
-// persist(); matches the bulk-array pattern the rest of the app uses.
 const pushCollection = async (stateKey: keyof CRMState) => {
   const collection = CRM_COLLECTION[stateKey];
   if (!collection) return;
   try {
-    await fetch(`${getApiBase()}/sync`, {
+    await fetch('/sync', {
       method: 'POST',
       credentials: 'include',
-      headers: { 'Content-Type': 'application/json', ...getApiAuthHeader() },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ collection, data: state[stateKey] }),
     });
   } catch (e) {
@@ -70,10 +63,9 @@ const deleteFromRemote = async (stateKey: keyof CRMState, id: string) => {
   const collection = CRM_COLLECTION[stateKey];
   if (!collection) return;
   try {
-    await fetch(`${getApiBase()}/delete/${collection}/${encodeURIComponent(id)}`, {
+    await fetch(`/delete/${collection}/${encodeURIComponent(id)}`, {
       method: 'DELETE',
       credentials: 'include',
-      headers: getApiAuthHeader(),
     });
   } catch (e) {
     logger.error(`CRM /delete failed for ${collection}/${id}:`, e);
@@ -186,9 +178,8 @@ const persist = (key: keyof CRMState, data: any[], changedRecord?: any) => {
  */
 export const loadCRMFromAPI = async (): Promise<void> => {
   try {
-    const res = await fetch(`${getApiBase()}/sync/all`, {
+    const res = await fetch('/sync/all', {
       credentials: 'include',
-      headers: getApiAuthHeader(),
     });
     if (!res.ok) {
       logger.warn(`CRM /sync/all returned ${res.status}`);

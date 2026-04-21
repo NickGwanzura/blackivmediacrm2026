@@ -1,4 +1,4 @@
-import { getApiConfig, getCompanyProfile } from './mockData';
+import { getCompanyProfile } from './mockData';
 import { Client, Invoice, Contract, User } from '../types';
 import { generateInvoicePDF, generateContractPDF, generateStatementPDF, PdfBase64 } from './pdfGenerator';
 
@@ -21,17 +21,14 @@ export interface SendEmailPayload {
 
 export interface EmailResult { success: boolean; message: string; id?: string; }
 
-const emailEndpoint = () => {
-    const { url } = getApiConfig();
-    return `${url}/email/send`;
-};
-
 export const sendEmail = async (payload: SendEmailPayload): Promise<EmailResult> => {
-    const { key } = getApiConfig();
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (key) headers['Authorization'] = `Bearer ${key}`;
     try {
-        const res = await fetch(emailEndpoint(), { method: 'POST', headers, credentials: 'include', body: JSON.stringify(payload) });
+        const res = await fetch('/email/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify(payload),
+        });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
             return { success: false, message: data.error || `Email failed (HTTP ${res.status}).` };

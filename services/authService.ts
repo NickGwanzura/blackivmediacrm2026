@@ -1,5 +1,4 @@
 import { User } from '../types';
-import { getApiConfig } from './mockData';
 
 // --- Cache of the current user -------------------------------------------
 // Source of truth is always the server (via /auth/me). The localStorage copy
@@ -42,11 +41,6 @@ const setCachedUser = (user: User | null) => {
     } catch { /* best-effort */ }
 };
 
-const authBase = () => {
-    const { url } = getApiConfig();
-    return url || '';
-};
-
 type AuthError = Error & { status?: number };
 
 const throwFromResponse = async (res: Response): Promise<never> => {
@@ -61,7 +55,7 @@ const throwFromResponse = async (res: Response): Promise<never> => {
 };
 
 async function authFetch(path: string, init: RequestInit = {}): Promise<Response> {
-    const res = await fetch(`${authBase()}${path}`, {
+    const res = await fetch(path, {
         ...init,
         credentials: 'include',
         headers: {

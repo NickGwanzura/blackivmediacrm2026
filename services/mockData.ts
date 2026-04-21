@@ -34,8 +34,6 @@ const STORAGE_KEYS = {
     AUTO_BACKUP: 'bi_auto_backup_data',
     CLOUD_MIRROR: 'bi_google_cloud_mirror',
     DATA_VERSION: 'bi_data_version',
-    API_URL: 'bi_api_url', // New key for SQL/API Backend
-    API_KEY: 'bi_api_key'  // Optional auth key
 };
 
 const loadFromStorage = <T>(key: string, defaultValue: T | null): T | null => {
@@ -50,46 +48,12 @@ const loadFromStorage = <T>(key: string, defaultValue: T | null): T | null => {
 };
 
 // --- REMOTE SYNC LOGIC ---
-// The API server (in /server) is co-deployed with this SPA on Railway, so
-// it always shares the browser's origin. Default to window.location.origin
-// so every consumer works without user-supplied config; legacy installs
-// that stored a different URL in localStorage still override the default.
-const DEFAULT_API_URL = typeof window !== 'undefined' ? window.location.origin : '';
-const DEFAULT_API_KEY = '';
-
-// API URL is non-sensitive and may persist across sessions.
-// API key is a bearer secret: keep it in sessionStorage so it doesn't
-// survive browser restart. One-time migration drains any legacy key
-// previously stored in localStorage into sessionStorage, then removes it.
-const legacyKey = localStorage.getItem(STORAGE_KEYS.API_KEY);
-if (legacyKey !== null) {
-    if (legacyKey) sessionStorage.setItem(STORAGE_KEYS.API_KEY, legacyKey);
-    localStorage.removeItem(STORAGE_KEYS.API_KEY);
-}
-
-let remoteApiUrl = localStorage.getItem(STORAGE_KEYS.API_URL) ?? DEFAULT_API_URL;
-let remoteApiKey = sessionStorage.getItem(STORAGE_KEYS.API_KEY) ?? DEFAULT_API_KEY;
-
-// Migrate legacy Supabase URLs left over from older installs — they point
-// at the decommissioned Supabase project and will 404 against the new API.
-if (remoteApiUrl && remoteApiUrl.includes('supabase.co')) {
-    localStorage.removeItem(STORAGE_KEYS.API_URL);
-    sessionStorage.removeItem(STORAGE_KEYS.API_KEY);
-    remoteApiUrl = DEFAULT_API_URL;
-    remoteApiKey = DEFAULT_API_KEY;
-}
-
-export const setApiConfig = (url: string, key: string) => {
-    // Remove trailing slash if present
-    const cleanUrl = url.endsWith('/') ? url.slice(0, -1) : url;
-    remoteApiUrl = cleanUrl;
-    remoteApiKey = key;
-    localStorage.setItem(STORAGE_KEYS.API_URL, cleanUrl);
-    if (key) sessionStorage.setItem(STORAGE_KEYS.API_KEY, key);
-    else sessionStorage.removeItem(STORAGE_KEYS.API_KEY);
-};
-
-export const getApiConfig = () => ({ url: remoteApiUrl, key: remoteApiKey });
+// The Express API is co-deployed with this SPA on Railway and shares the
+// browser's origin, so every fetch uses a relative path. Auth is handled
+// via HTTP-only session cookies (credentials: 'include'); the /auth and
+// /sync endpoints ignore any Authorization header. An older abstraction
+// exposed a configurable base URL + Bearer key — removed once the
+// Supabase backend was retired in favor of the co-deployed server.
 
 // Storage key → server collection name. Explicit map beats regex munging:
 // the /sync endpoint keys on these exact names and unknown names are no-ops.
@@ -131,12 +95,9 @@ const pushToRemote = async (key: string, data: any): Promise<void> => {
         });
     }
 
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (remoteApiKey) headers['Authorization'] = `Bearer ${remoteApiKey}`;
-
-    const response = await fetch(`${remoteApiUrl}/sync`, {
+    const response = await fetch('/sync', {
         method: 'POST',
-        headers,
+        headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({ collection: collectionName, data: payload }),
     });
@@ -148,11 +109,8 @@ const pushToRemote = async (key: string, data: any): Promise<void> => {
 
 const deleteFromRemote = async (collectionName: string, id: string) => {
     try {
-        const headers: Record<string, string> = {};
-        if (remoteApiKey) headers['Authorization'] = `Bearer ${remoteApiKey}`;
-        await fetch(`${remoteApiUrl}/delete/${encodeURIComponent(collectionName)}/${encodeURIComponent(id)}`, {
+        await fetch(`/delete/${encodeURIComponent(collectionName)}/${encodeURIComponent(id)}`, {
             method: 'DELETE',
-            headers,
             credentials: 'include',
         });
     } catch (e) {
@@ -202,35 +160,6 @@ export const forcePushToRemote = async (): Promise<{success: boolean, message: s
         message: `Uploaded ${collections.length - failures.length}/${collections.length} collections. ${failures.length} failed.`,
         failures,
     };
-};
-
-export const validateConnection = async (url: string, key: string): Promise<{success: boolean, step: string, message: string}> => {
-    const cleanUrl = (url || '').endsWith('/') ? url.slice(0, -1) : (url || '');
-
-    try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 8000);
-
-        const headers: Record<string, string> = {};
-        if (key) headers['Authorization'] = `Bearer ${key}`;
-
-        const res = await fetch(`${cleanUrl}/health/db`, { headers, credentials: 'include', signal: controller.signal });
-        clearTimeout(timeout);
-
-        if (!res.ok) {
-            if (res.status === 401) return { success: false, step: 'Authentication', message: "Invalid API key." };
-            if (res.status === 503) return { success: false, step: 'Database', message: "API reached, but Neon is unreachable." };
-            return { success: false, step: 'API', message: `Status ${res.status}: ${res.statusText}` };
-        }
-
-        const data = await res.json();
-        if (!data.ok) return { success: false, step: 'Database', message: data.error || 'Neon unreachable' };
-
-        return { success: true, step: 'Complete', message: 'Connected to Neon-backed API.' };
-    } catch (e: any) {
-        const msg = e.name === 'AbortError' ? 'Connection timed out' : (e.message || 'Unknown error');
-        return { success: false, step: 'Reachability', message: msg };
-    }
 };
 
 // Window within which a local-only item is treated as "new, not yet synced"
@@ -295,10 +224,7 @@ export const pullFromRemote = async (shouldReload: boolean = false): Promise<{su
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 8000);
 
-        const headers: Record<string, string> = {};
-        if (remoteApiKey) headers['Authorization'] = `Bearer ${remoteApiKey}`;
-
-        const response = await fetch(`${remoteApiUrl}/sync/all`, { headers, credentials: 'include', signal: controller.signal });
+        const response = await fetch('/sync/all', { credentials: 'include', signal: controller.signal });
         clearTimeout(timeoutId);
 
         if (response.ok) {
@@ -593,13 +519,9 @@ const genLogId = (): string => {
 // will eventually sync on reconnect.
 const forwardLogToServer = async (action: string, details: string) => {
     try {
-        const { url, key } = getApiConfig();
-        if (!url) return; // No API configured; local-only mode.
-        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-        if (key) headers['Authorization'] = `Bearer ${key}`;
-        await fetch(`${url}/audit/log`, {
+        await fetch('/audit/log', {
             method: 'POST',
-            headers,
+            headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
             body: JSON.stringify({ action, details }),
         });
@@ -628,12 +550,8 @@ export const logAction = (action: string, details: string) => {
 // non-admin caller. Used by the Settings → Audit tab to render the
 // authoritative record (vs. just this browser's localStorage mirror).
 export const fetchServerAuditLogs = async (limit = 500): Promise<AuditLogEntry[]> => {
-    const { url, key } = getApiConfig();
-    if (!url) return [];
     try {
-        const headers: Record<string, string> = {};
-        if (key) headers['Authorization'] = `Bearer ${key}`;
-        const res = await fetch(`${url}/audit/log?limit=${limit}`, { headers, credentials: 'include' });
+        const res = await fetch(`/audit/log?limit=${limit}`, { credentials: 'include' });
         if (!res.ok) return [];
         const data = await res.json();
         return Array.isArray(data.logs)
@@ -865,18 +783,14 @@ export const recordCloudSync = async () => {
     saveToStorage(STORAGE_KEYS.LAST_CLOUD_SYNC, lastCloudSyncDate, false);
     
     // 3. Perform Full Remote Push (Synchronize all tables)
-    if(remoteApiUrl) {
-        try {
-            await forcePushToRemote();
-            // Also push the metadata blob for good measure
-            pushToRemote('full_backup', backupData);
-            logAction('Cloud Sync', 'Restore Point: Full database synchronization completed.');
-        } catch (e) {
-            logAction('Cloud Sync', 'Restore Point Failed: Could not push to remote.');
-            throw e;
-        }
-    } else {
-        logAction('Cloud Sync', 'Local snapshot created (No Remote API Configured)');
+    try {
+        await forcePushToRemote();
+        // Also push the metadata blob for good measure
+        pushToRemote('full_backup', backupData);
+        logAction('Cloud Sync', 'Restore Point: Full database synchronization completed.');
+    } catch (e) {
+        logAction('Cloud Sync', 'Restore Point Failed: Could not push to remote.');
+        throw e;
     }
     
     return now;
