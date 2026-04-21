@@ -345,6 +345,7 @@ export const Settings: React.FC = () => {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
     setBackupStatus(prev => ({ ...prev, manual: getLastManualBackupDate() }));
     toast.success("Backup file downloaded.");
   };
@@ -540,12 +541,12 @@ export const Settings: React.FC = () => {
                     <div className="mb-6 bg-slate-50 p-4 rounded-xl border border-slate-100 flex flex-col gap-4">
                         <div className="flex justify-between items-center">
                             <div>
-                                <p className="text-xs font-bold uppercase text-slate-400 tracking-wider mb-1">Last Auto-Backup</p>
+                                <p className="text-xs font-bold uppercase text-slate-400 tracking-wider mb-1">Last Local Auto-Save</p>
                                 <p className="text-sm font-medium text-slate-700">{backupStatus.auto}</p>
                             </div>
                             <div className="h-8 w-[1px] bg-slate-200"></div>
                             <div>
-                                <p className="text-xs font-bold uppercase text-slate-400 tracking-wider mb-1">Last Snapshot</p>
+                                <p className="text-xs font-bold uppercase text-slate-400 tracking-wider mb-1">Last Neon Sync</p>
                                 <p className="text-sm font-medium text-slate-700">{backupStatus.cloud}</p>
                             </div>
                         </div>
@@ -561,7 +562,7 @@ export const Settings: React.FC = () => {
                     <div className="space-y-4">
                         <div className="p-4 bg-white rounded-xl border border-slate-200 shadow-sm">
                              <h4 className="text-sm font-bold text-slate-800 mb-2 flex items-center gap-2"><Cloud size={16}/> Create Restore Point</h4>
-                             <p className="text-xs text-slate-500 mb-4">Creates a timestamped snapshot of all data and syncs it to Neon (if the API is connected).</p>
+                             <p className="text-xs text-slate-500 mb-4">Creates a timestamped snapshot of all data and pushes it to Neon.</p>
                              <button onClick={handleGoogleSync} disabled={isSyncing} className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-bold uppercase tracking-wider transition-colors shadow-lg shadow-blue-500/30 flex items-center justify-center gap-2">
                                  {isSyncing ? <Loader2 className="animate-spin" size={16}/> : <Upload size={16}/>}
                                  {isSyncing ? 'Syncing...' : 'Create & Sync Restore Point'}
@@ -597,7 +598,7 @@ export const Settings: React.FC = () => {
                     <div className="space-y-6">
                         <div className="p-6 bg-red-50/50 rounded-2xl border border-red-50">
                             <h4 className="text-sm font-bold text-red-900 mb-2">Reset Application Data</h4>
-                            <p className="text-xs text-red-700/80 mb-6 leading-relaxed">This action will <strong>PERMANENTLY DELETE</strong> all local data including clients, contracts, and financial records. This cannot be undone.</p>
+                            <p className="text-xs text-red-700/80 mb-6 leading-relaxed">Clears this browser's local data (clients, contracts, financial records). Server data in Neon is not affected — you can recover everything by signing back in and resyncing.</p>
                             <button onClick={() => setIsResetConfirmOpen(true)} className="w-full py-3 bg-white border border-red-200 text-red-600 hover:bg-red-50 rounded-xl text-sm font-bold uppercase tracking-wider transition-colors">Reset System</button>
                         </div>
                     </div>
@@ -827,7 +828,7 @@ export const Settings: React.FC = () => {
         isOpen={isResetConfirmOpen}
         onClose={() => { setIsResetConfirmOpen(false); setResetConfirmText(''); }}
         title="Reset Application Data"
-        description="This action permanently deletes all local data and cannot be undone."
+        description="Clears this browser's local data. Server data in Neon is not affected and can be resynced."
         size="sm"
         role="alertdialog"
         variant="danger"
@@ -845,7 +846,7 @@ export const Settings: React.FC = () => {
       >
         <div className="space-y-4">
           <p className="text-sm text-slate-600 leading-relaxed">
-            This action will <strong>PERMANENTLY DELETE</strong> all local data including clients, contracts, and financial records. This cannot be undone.
+            This wipes <strong>all local data</strong> in this browser (clients, contracts, financial records) and reloads the page. The server database in Neon is <strong>not touched</strong>; signing back in and resyncing restores everything.
           </p>
           <div>
             <p className="text-xs text-slate-500 mb-2">Type <span className="font-mono font-bold text-red-700">RESET</span> to confirm:</p>
