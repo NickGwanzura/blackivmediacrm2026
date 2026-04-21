@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   BarChart, Bar, Cell, PieChart, Pie, ComposedChart, Line
@@ -22,6 +22,7 @@ import { formatCurrency, formatCurrencyTotals, sumByCurrency } from '../utils/sa
 // the legacy series; cards that handle mixed currencies use
 // formatCurrencyTotals instead.
 const fmt = (n: number) => formatCurrency(Math.round(n), 'USD');
+const chartFmt = (n: number, currency: string) => formatCurrency(Math.round(n), currency);
 
 const pct = (num: number, denom: number): number => {
   if (!Number.isFinite(num) || !Number.isFinite(denom) || denom <= 0) return 0;
@@ -98,6 +99,17 @@ export const Dashboard: React.FC = () => {
   const primaryProfit = profitByCurrency[primaryCurrency] || 0;
   const profitMargin = pct(primaryProfit, primaryRevenue);
   const profitPositive = Object.values(profitByCurrency).every(v => v >= 0);
+
+  const [trendCurrency, setTrendCurrency] = useState(primaryCurrency);
+
+  const chartData = useMemo(() => {
+    return financialTrends.map(t => ({
+      name: t.name,
+      revenue: (t as any).revenueByCurrency?.[trendCurrency] || 0,
+      expenses: (t as any).expensesByCurrency?.[trendCurrency] || 0,
+      margin: (t as any).marginByCurrency?.[trendCurrency] || 0,
+    }));
+  }, [financialTrends, trendCurrency]);
 
   // Single-currency scalars kept for the financial-trends chart (revenue vs.
   // expenses over time). The trend series collapses to USD for now because
@@ -180,29 +192,38 @@ export const Dashboard: React.FC = () => {
   }, [clients, invoices]);
 
   // --- Expense Breakdown ---
-  // Percentages only make sense within a single currency, so the pie chart
-  // renders the *primary* currency's expense categories. A chip below the
-  // title names which currency is shown, and the non-primary totals appear
-  // in the KPI row above so nothing is hidden.
+  // Include ALL currencies, labeling each slice with its currency.
   const expenseBreakdown = useMemo(() => {
-    const byCategory = new Map<string, number>();
+    const entries: { name: string; value: number; currency: string }[] = [];
     for (const e of expenses) {
-      if (((e.currency || 'USD').toUpperCase()) !== primaryCurrency) continue;
-      byCategory.set(e.category, (byCategory.get(e.category) || 0) + (e.amount || 0));
+      const code = (e.currency || 'USD').toUpperCase();
+      entries.push({ name: `${e.category} (${code})`, value: e.amount || 0, currency: code });
     }
-    const printingInPrimary = printingJobs
-      .filter(p => ((p as any).currency || 'USD').toUpperCase() === primaryCurrency)
-      .reduce((a, p) => a + (p.totalCost || 0), 0);
-    if (printingInPrimary > 0) {
-      byCategory.set('Printing', (byCategory.get('Printing') || 0) + printingInPrimary);
+    for (const p of printingJobs) {
+      const code = ((p as any).currency || 'USD').toUpperCase();
+      entries.push({ name: `Printing (${code})`, value: p.totalCost || 0, currency: code });
     }
-    return Array.from(byCategory.entries())
-      .map(([name, value]) => ({ name, value }))
+    // Group by name+currency
+    const grouped = new Map<string, { name: string; value: number; currency: string }>();
+    for (const e of entries) {
+      const existing = grouped.get(e.name);
+      if (existing) existing.value += e.value;
+      else grouped.set(e.name, { ...e });
+    }
+    return Array.from(grouped.values())
       .filter(x => x.value > 0)
       .sort((a, b) => b.value - a.value);
-  }, [expenses, printingJobs, primaryCurrency]);
+  }, [expenses, printingJobs]);
 
   const primaryExpenditure = expenditureByCurrency[primaryCurrency] || 0;
+
+  const marginSub = Object.entries(revenueByCurrency)
+    .filter(([, rev]) => rev > 0)
+    .map(([code]) => {
+      const m = pct(profitByCurrency[code] || 0, revenueByCurrency[code] || 0);
+      return `${m}% ${code}`;
+    })
+    .join(' · ');
 
   const user = getCurrentUser();
   const today = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
@@ -267,7 +288,7 @@ export const Dashboard: React.FC = () => {
             value={formatCurrencyTotals(profitByCurrency)}
             icon={profitPositive ? TrendingUp : TrendingDown}
             tone={profitPositive ? 'emerald' : 'rose'}
-            sub={`${profitMargin}% ${primaryCurrency} margin`}
+            sub={`${marginSub} margin`}
           />
           <KpiCard
             label="Occupancy"
@@ -304,11 +325,26 @@ export const Dashboard: React.FC = () => {
               <h3 className="text-xl font-bold text-slate-900">Financial Performance</h3>
               <p className="text-sm text-slate-500 font-medium">Revenue, expenses, and margin over time</p>
             </div>
-            <Legend />
+            <div className="flex items-center gap-3 flex-wrap">
+              {Object.keys(revenueByCurrency).length > 1 && (
+                <div className="flex items-center gap-1 bg-slate-50 p-1 rounded-lg border border-slate-200">
+                  {Object.keys(revenueByCurrency).sort().map(code => (
+                    <button
+                      key={code}
+                      onClick={() => setTrendCurrency(code)}
+                      className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${trendCurrency === code ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}
+                    >
+                      {code}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <Legend />
+            </div>
           </div>
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={financialTrends}>
+              <ComposedChart data={chartData}>
                 <defs>
                   <linearGradient id="revenueGradient" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor="#18181b" stopOpacity={0.85} />
@@ -319,7 +355,7 @@ export const Dashboard: React.FC = () => {
                 <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#71717a', fontSize: 12, fontWeight: 500 }} dy={10} />
                 <YAxis axisLine={false} tickLine={false} tick={{ fill: '#71717a', fontSize: 12 }} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
                 <Tooltip
-                  formatter={(v: number) => fmt(v)}
+                  formatter={(v: number) => chartFmt(v, trendCurrency)}
                   contentStyle={{ backgroundColor: 'rgba(255,255,255,0.95)', borderRadius: 12, border: '1px solid #e4e4e7', padding: 12 }}
                   itemStyle={{ fontSize: 13, fontWeight: 600 }}
                   cursor={{ fill: '#f4f4f5' }}
@@ -338,11 +374,11 @@ export const Dashboard: React.FC = () => {
             <div className="flex items-center justify-between mb-6">
               <div>
                 <h3 className="text-lg font-bold text-slate-900">Expenditure Breakdown</h3>
-                <p className="text-xs text-slate-500 font-medium mt-0.5">By category, {primaryCurrency} only · full multi-currency totals in the KPI row</p>
+                <p className="text-xs text-slate-500 font-medium mt-0.5">By category, all currencies</p>
               </div>
               <div className="text-right">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">{primaryCurrency} Total</p>
-                <p className="text-lg font-extrabold text-slate-900">{formatCurrency(primaryExpenditure, primaryCurrency)}</p>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Total</p>
+                <p className="text-lg font-extrabold text-slate-900">{formatCurrencyTotals(expenditureByCurrency)}</p>
               </div>
             </div>
             {expenseBreakdown.length === 0 ? (
@@ -362,20 +398,20 @@ export const Dashboard: React.FC = () => {
                           <Cell key={i} fill={EXPENSE_COLORS[i % EXPENSE_COLORS.length]} />
                         ))}
                       </Pie>
-                      <Tooltip formatter={(v: number) => formatCurrency(v, primaryCurrency)} contentStyle={{ borderRadius: 12, border: '1px solid #e4e4e7', fontSize: 12 }} />
+                      <Tooltip formatter={(v: number, _n, p: any) => formatCurrency(v, p?.payload?.currency)} contentStyle={{ borderRadius: 12, border: '1px solid #e4e4e7', fontSize: 12 }} />
                     </PieChart>
                   </ResponsiveContainer>
                 </div>
                 <div className="flex-1 min-w-0 space-y-2">
                   {expenseBreakdown.map((row, i) => {
-                    const share = pct(row.value, primaryExpenditure);
+                    const share = pct(row.value, expenditureByCurrency[row.currency] || 0);
                     return (
                       <div key={row.name} className="flex items-center gap-3">
                         <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: EXPENSE_COLORS[i % EXPENSE_COLORS.length] }} />
                         <div className="flex-1 min-w-0">
                           <div className="flex justify-between items-baseline text-sm mb-1">
                             <span className="font-bold text-slate-800 truncate">{row.name}</span>
-                            <span className="font-bold text-slate-900 ml-2">{formatCurrency(row.value, primaryCurrency)}</span>
+                            <span className="font-bold text-slate-900 ml-2">{formatCurrency(row.value, row.currency)}</span>
                           </div>
                           <div className="h-1 rounded-full bg-slate-100 overflow-hidden">
                             <div

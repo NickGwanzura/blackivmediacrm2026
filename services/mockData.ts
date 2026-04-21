@@ -1333,48 +1333,87 @@ export const getFinancialTrends = () => {
         const year = d.getFullYear();
         const monthIndex = d.getMonth();
 
-        const monthlyRevenue = invoices
+        const monthlyRevenueByCurrency: Record<string, number> = {};
+        invoices
             .filter(inv => {
                 const invDate = new Date(inv.date);
                 return inv.type === 'Invoice' && invDate.getMonth() === monthIndex && invDate.getFullYear() === year;
             })
-            .reduce((acc, curr) => acc + curr.total, 0);
+            .forEach(inv => {
+                const code = (inv.currency || 'USD').toUpperCase();
+                monthlyRevenueByCurrency[code] = (monthlyRevenueByCurrency[code] || 0) + inv.total;
+            });
 
-        const monthlyExpenses = expenses
+        const totalExpensesByCurrency: Record<string, number> = {};
+        expenses
             .filter(exp => {
                 const expDate = new Date(exp.date);
                 return expDate.getMonth() === monthIndex && expDate.getFullYear() === year;
             })
-            .reduce((acc, curr) => acc + curr.amount, 0);
+            .forEach(exp => {
+                const code = (exp.currency || 'USD').toUpperCase();
+                totalExpensesByCurrency[code] = (totalExpensesByCurrency[code] || 0) + exp.amount;
+            });
             
-        const monthlyPrinting = printingJobs
+        printingJobs
             .filter(job => {
                 const jobDate = new Date(job.date);
                 return jobDate.getMonth() === monthIndex && jobDate.getFullYear() === year;
             })
-            .reduce((acc, curr) => acc + curr.totalCost, 0);
+            .forEach(job => {
+                const code = ((job as any).currency || 'USD').toUpperCase();
+                totalExpensesByCurrency[code] = (totalExpensesByCurrency[code] || 0) + job.totalCost;
+            });
 
-        const totalExpenses = monthlyExpenses + monthlyPrinting;
+        const marginByCurrency: Record<string, number> = {};
+        const allCurrencies = new Set([...Object.keys(monthlyRevenueByCurrency), ...Object.keys(totalExpensesByCurrency)]);
+        for (const code of allCurrencies) {
+            marginByCurrency[code] = (monthlyRevenueByCurrency[code] || 0) - (totalExpensesByCurrency[code] || 0);
+        }
 
         result.push({
             name: monthName,
-            revenue: monthlyRevenue,
-            expenses: totalExpenses,
-            margin: monthlyRevenue - totalExpenses
+            revenueByCurrency: monthlyRevenueByCurrency,
+            expensesByCurrency: totalExpensesByCurrency,
+            marginByCurrency,
+            // legacy scalar fields (sum of all currencies — not great but preserves other callers)
+            revenue: Object.values(monthlyRevenueByCurrency).reduce((a, v) => a + v, 0),
+            expenses: Object.values(totalExpensesByCurrency).reduce((a, v) => a + v, 0),
+            margin: Object.values(marginByCurrency).reduce((a, v) => a + v, 0)
         });
     }
 
     const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, 1);
-    const activeContractRevenue = contracts
-        .filter(c => c.status === 'Active').reduce((acc, c) => acc + c.monthlyRate, 0);
+    const activeContractRevenueByCurrency: Record<string, number> = {};
+    contracts
+        .filter(c => c.status === 'Active')
+        .forEach(c => {
+            const code = (c.currency || 'USD').toUpperCase();
+            activeContractRevenueByCurrency[code] = (activeContractRevenueByCurrency[code] || 0) + c.monthlyRate;
+        });
     
-    const avgExpenses = result.slice(-3).reduce((acc, curr) => acc + curr.expenses, 0) / 3 || 0;
+    const avgExpensesByCurrency: Record<string, number> = {};
+    const lastThree = result.slice(-3);
+    for (const code of new Set(lastThree.flatMap((r: any) => Object.keys(r.expensesByCurrency || {})))) {
+        const sum = lastThree.reduce((acc, curr: any) => acc + (curr.expensesByCurrency?.[code] || 0), 0);
+        avgExpensesByCurrency[code] = Math.round(sum / 3);
+    }
+
+    const projectionMarginByCurrency: Record<string, number> = {};
+    const projectionCurrencies = new Set([...Object.keys(activeContractRevenueByCurrency), ...Object.keys(avgExpensesByCurrency)]);
+    for (const code of projectionCurrencies) {
+        projectionMarginByCurrency[code] = (activeContractRevenueByCurrency[code] || 0) - (avgExpensesByCurrency[code] || 0);
+    }
 
     result.push({
         name: nextMonth.toLocaleString('default', { month: 'short' }) + ' (Proj)',
-        revenue: activeContractRevenue,
-        expenses: Math.round(avgExpenses),
-        margin: activeContractRevenue - Math.round(avgExpenses),
+        revenueByCurrency: activeContractRevenueByCurrency,
+        expensesByCurrency: avgExpensesByCurrency,
+        marginByCurrency: projectionMarginByCurrency,
+        // legacy scalar fields
+        revenue: Object.values(activeContractRevenueByCurrency).reduce((a, v) => a + v, 0),
+        expenses: Object.values(avgExpensesByCurrency).reduce((a, v) => a + v, 0),
+        margin: Object.values(projectionMarginByCurrency).reduce((a, v) => a + v, 0),
         isProjection: true
     });
 
@@ -1470,6 +1509,23 @@ export const deleteContract = (id: string) => {
 export const addInvoice = (invoice: Invoice) => { invoices = [invoice, ...invoices]; saveToStorage(STORAGE_KEYS.INVOICES, invoices); logAction('Create Invoice', `Created ${invoice.type} #${invoice.id} (${invoice.currency || 'USD'} ${invoice.total})`); };
 export const markInvoiceAsPaid = (id: string) => { invoices = invoices.map(i => i.id === id ? { ...i, status: 'Paid' } : i); saveToStorage(STORAGE_KEYS.INVOICES, invoices); logAction('Payment', `Marked Invoice #${id} as Paid`); };
 export const addExpense = (expense: Expense) => { expenses = [expense, ...expenses]; saveToStorage(STORAGE_KEYS.EXPENSES, expenses); logAction('Expense', `Recorded expense: ${expense.description} (${expense.currency || 'USD'} ${expense.amount})`); };
+
+// Wipe every expense — local AND server. The server's relational mirror
+// upserts but never deletes orphans, so we have to issue per-row deletes
+// against /delete/expenses/:id before clearing the local array. Returns the
+// row count so the caller can report how many were actually removed.
+export const wipeExpenses = async (): Promise<number> => {
+    const previous = expenses;
+    const n = previous.length;
+    // Fire server-side deletes in parallel; each is best-effort (same
+    // semantics as deleteFromRemote — transport errors get logged but don't
+    // block the local wipe).
+    await Promise.all(previous.map(e => deleteFromRemote('expenses', e.id)));
+    expenses = [];
+    saveToStorage(STORAGE_KEYS.EXPENSES, expenses, false);
+    logAction('Expense', `Wiped ${n} expense record${n === 1 ? '' : 's'}`);
+    return n;
+};
 
 export const addClient = (client: Client) => { 
     clients = [...clients, client]; 
