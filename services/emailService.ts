@@ -27,10 +27,7 @@ const emailEndpoint = () => {
 };
 
 export const sendEmail = async (payload: SendEmailPayload): Promise<EmailResult> => {
-    const { url, key } = getApiConfig();
-    if (!url) {
-        return { success: false, message: 'Cloud API URL is not configured. Open Settings → Cloud Database to set it.' };
-    }
+    const { key } = getApiConfig();
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (key) headers['Authorization'] = `Bearer ${key}`;
     try {

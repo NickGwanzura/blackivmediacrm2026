@@ -5,7 +5,7 @@ import { getClients, addClient, deleteClient, updateClient, getNextBillingDetail
 import { generateActiveClientsPDF } from '../services/pdfGenerator';
 import { Mail, Phone, MoreHorizontal, User, Plus, Save, Search, Trash2, Calendar, Clock, Edit2, CreditCard, FileDown, UserPlus, PencilLine } from 'lucide-react';
 import { AccessibleModal, ModalButton } from './ui/AccessibleModal';
-import { FormInput, FormNumber, FormSection } from './ui/Form';
+import { FormInput, FormNumber, FormSection, FormRow } from './ui/Form';
 
 
 

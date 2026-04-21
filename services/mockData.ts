@@ -50,10 +50,11 @@ const loadFromStorage = <T>(key: string, defaultValue: T | null): T | null => {
 };
 
 // --- REMOTE SYNC LOGIC ---
-// The API server (in /server) speaks a simple Node-style protocol on the
-// same origin that serves this SPA: empty URL = same origin. Point at a
-// different host only when the API is deployed separately.
-const DEFAULT_API_URL = '';
+// The API server (in /server) is co-deployed with this SPA on Railway, so
+// it always shares the browser's origin. Default to window.location.origin
+// so every consumer works without user-supplied config; legacy installs
+// that stored a different URL in localStorage still override the default.
+const DEFAULT_API_URL = typeof window !== 'undefined' ? window.location.origin : '';
 const DEFAULT_API_KEY = '';
 
 // API URL is non-sensitive and may persist across sessions.
