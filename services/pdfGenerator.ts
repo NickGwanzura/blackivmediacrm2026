@@ -575,6 +575,10 @@ export const generateMasterContractPDF = (contracts: Contract[], client: Client,
         });
 
         // Signatures
+        if (currentY > 240) {
+            doc.addPage();
+            currentY = 55;
+        }
         currentY += 25;
         doc.setDrawColor(150);
         doc.line(14, currentY, 90, currentY);
@@ -773,6 +777,10 @@ export const generateContractPDF = (contract: Contract, client: Client, billboar
     currentY += 20;
     
     // Signatures
+    if (currentY > 240) {
+        doc.addPage();
+        currentY = 55;
+    }
     doc.setDrawColor(150);
     doc.line(14, currentY, 90, currentY);
     doc.line(110, currentY, 186, currentY);
