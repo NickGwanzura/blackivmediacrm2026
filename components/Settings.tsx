@@ -1,16 +1,12 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useToast } from './Toast';
-import { getUsers, addUser, updateUser, deleteUser, getAuditLogs, fetchServerAuditLogs, getCompanyLogo, setCompanyLogo, getCompanyProfile, updateCompanyProfile, RELEASE_NOTES, resetSystemData, createSystemBackup, restoreSystemBackup, getLastManualBackupDate, getAutoBackupStatus, getStorageUsage, recordCloudSync, getLastCloudSyncDate, getApiConfig, setApiConfig, pullFromRemote, forcePushToRemote, validateConnection, getLastSyncedAt } from '../services/mockData';
+import { getUsers, addUser, updateUser, deleteUser, getAuditLogs, fetchServerAuditLogs, getCompanyLogo, setCompanyLogo, getCompanyProfile, updateCompanyProfile, RELEASE_NOTES, resetSystemData, createSystemBackup, restoreSystemBackup, getLastManualBackupDate, getAutoBackupStatus, getStorageUsage, recordCloudSync, getLastCloudSyncDate, pullFromRemote, getLastSyncedAt } from '../services/mockData';
 import { generateFeaturesPDF } from '../services/pdfGenerator';
 import { getCurrentUser, approveUser as approveUserApi, inviteUser as inviteUserApi, requestPasswordReset } from '../services/authService';
-import { Shield, Download, X, Save, Phone, MapPin, Edit2, Trash2, AlertTriangle, Cloud, Upload, History, RefreshCw, Database, FileUp, FileDown, Clock, HardDrive, BookOpen, Loader2, Smartphone, Monitor, Code, Eye, EyeOff, Wifi, FileText, ArrowUpCircle, UserCheck, Mail, Send, KeyRound, Building, ScrollText, Lock } from 'lucide-react';
+import { Shield, Download, Phone, MapPin, Edit2, Trash2, AlertTriangle, Cloud, Upload, History, RefreshCw, Database, FileUp, FileDown, Clock, HardDrive, BookOpen, Loader2, Smartphone, Monitor, UserCheck, Mail, Send, KeyRound, Building, ScrollText, Lock, UserPlus, UserCog } from 'lucide-react';
+import { AccessibleModal, ModalButton } from './ui/AccessibleModal';
 import { User as UserType, CompanyProfile } from '../types';
-// Import the canonical schema at build time so the UI can't drift from what
-// the server actually runs. Vite's `?raw` inlines the file contents as a
-// string; any change to server/schema.sql is reflected here on next build.
-// @ts-expect-error: `?raw` suffix is a Vite-specific loader
-import SQL_SCRIPT from '../server/schema.sql?raw';
 
 type InputChange = (e: React.ChangeEvent<HTMLInputElement>) => void;
 type SelectChange = (e: React.ChangeEvent<HTMLSelectElement>) => void;
@@ -60,7 +56,7 @@ export const Settings: React.FC = () => {
   const toast = useToast();
   const currentUser = getCurrentUser();
   const isAdmin = currentUser?.role === 'Admin';
-  const [activeTab, setActiveTab] = useState<'General' | 'Audit' | 'Data' | 'SQL' | 'ReleaseNotes' | 'Features'>('General');
+  const [activeTab, setActiveTab] = useState<'General' | 'Audit' | 'Data' | 'ReleaseNotes' | 'Features'>('General');
   const [users, setUsers] = useState<UserType[]>(getUsers());
   const [logoPreview, setLogoPreview] = useState(getCompanyLogo());
   const [profile, setProfile] = useState<CompanyProfile>(getCompanyProfile());
@@ -78,17 +74,10 @@ export const Settings: React.FC = () => {
   const [backupStatus, setBackupStatus] = useState({ manual: getLastManualBackupDate(), auto: getAutoBackupStatus(), storage: getStorageUsage(), cloud: getLastCloudSyncDate() });
   const [isSyncing, setIsSyncing] = useState(false);
 
-  // SQL/API State
-  const [apiConfig, setApiConfigState] = useState(getApiConfig());
+  // Cloud sync UI state — the underlying plumbing is same-origin to the
+  // Neon-backed API (see services/mockData.ts). No user-facing config here;
+  // ops owns the deployment via Railway env vars.
   const [isPulling, setIsPulling] = useState(false);
-  const [isPushing, setIsPushing] = useState(false);
-  const [isVerifying, setIsVerifying] = useState(false);
-  const [showApiKey, setShowApiKey] = useState(false);
-  // 'unknown' until we verify against /health/db; stays on 'verified' after
-  // a successful check so the LED reflects real health rather than a guess.
-  const [connectionHealth, setConnectionHealth] = useState<'unknown' | 'verified' | 'error' | 'disconnected'>(
-      apiConfig.url ? 'unknown' : 'disconnected'
-  );
   const [lastSynced, setLastSynced] = useState<string | null>(getLastSyncedAt());
 
   // Audit logs are now server-authoritative. Fetch the most recent 500 from
@@ -121,18 +110,7 @@ export const Settings: React.FC = () => {
               cloud: getLastCloudSyncDate()
           });
       }
-      // Auto-verify the Cloud Database connection when the user opens the
-      // SQL tab, so the LED reflects actual health instead of a stale guess.
-      if (activeTab === 'SQL' && apiConfig.url && connectionHealth === 'unknown') {
-          let cancelled = false;
-          (async () => {
-              const result = await validateConnection(apiConfig.url, apiConfig.key);
-              if (cancelled) return;
-              setConnectionHealth(result.success ? 'verified' : 'error');
-          })();
-          return () => { cancelled = true; };
-      }
-  }, [activeTab, apiConfig.url, apiConfig.key, connectionHealth]);
+  }, [activeTab]);
 
   // Warn on full-page unload if there are unsaved Company Profile edits.
   // In-app tab switching is guarded separately in the tab button onClick.
@@ -206,105 +184,18 @@ export const Settings: React.FC = () => {
       toast.success("Company details updated successfully.");
   };
 
-  const handleSaveApiConfig = async (e: React.FormEvent) => {
-      e.preventDefault();
-      setApiConfig(apiConfig.url, apiConfig.key);
-      setConnectionHealth('unknown');
-
-      // Verify the new config against /health/db before touching data. If
-      // the server is wrong, fail loudly instead of silently writing to an
-      // unreachable host.
-      setIsVerifying(true);
-      const verified = await validateConnection(apiConfig.url, apiConfig.key);
-      setIsVerifying(false);
-
-      if (!verified.success) {
-          setConnectionHealth('error');
-          toast.error(`Connection saved, but verification failed at step: ${verified.step}\n${verified.message}`, "Verification Failed");
-          return;
-      }
-      setConnectionHealth('verified');
-
-      // Now pull fresh data. Reloading the page is the simplest way to let
-      // all views see the new state (components read from module-level store).
+  const handleResync = async () => {
       setIsPulling(true);
       const result = await pullFromRemote(false);
       setIsPulling(false);
       setLastSynced(getLastSyncedAt());
-
-      if (result.success) {
-          toast.success("Connection verified and data synced. Reloading…");
-          setTimeout(() => window.location.reload(), 600);
-      } else {
-          toast.error(`Connection saved, but sync failed:\n${result.message}`, "Sync Failed");
-      }
-  };
-
-  const handleIntegrityCheck = async () => {
-      if (!apiConfig.url) { toast.warning("Please enter a URL first."); return; }
-
-      setIsVerifying(true);
-      const result = await validateConnection(apiConfig.url, apiConfig.key);
-      setIsVerifying(false);
-      setConnectionHealth(result.success ? 'verified' : 'error');
-
-      if (result.success) {
-          toast.success(`${result.message}`, "Connection verified");
-      } else {
-          toast.error(`Failed at step: ${result.step}\n\nError: ${result.message}`, "Integrity Check Failed");
-      }
-  };
-
-  const handleManualPull = async () => {
-      setIsPulling(true);
-      const result = await pullFromRemote(false);
-      setIsPulling(false);
-      setLastSynced(getLastSyncedAt());
-      if (result.success) setConnectionHealth('verified');
 
       if (result.success) {
           toast.success("Data synced. Reloading to refresh views…");
           setTimeout(() => window.location.reload(), 600);
       } else {
-          setConnectionHealth('error');
           toast.error(`Sync Failed:\n${result.message}`);
       }
-  };
-
-  const handleForcePush = async () => {
-      const ok = await toast.confirm({
-          message: "This uploads the data in this browser to Neon. Any newer remote values for the same records will be overwritten.\n\nUse this to initialize a fresh database or force-publish local state.",
-          title: "Overwrite remote with local data?",
-          variant: 'danger',
-          confirmLabel: 'Upload'
-      });
-      if (!ok) return;
-
-      setIsPushing(true);
-      const result = await forcePushToRemote();
-      setIsPushing(false);
-      setLastSynced(getLastSyncedAt());
-
-      if (result.success) {
-          setConnectionHealth('verified');
-          toast.success(result.message, "Upload Successful");
-      } else {
-          setConnectionHealth('error');
-          const detail = result.failures && result.failures.length
-              ? `${result.message}\n\nFailures:\n• ${result.failures.join('\n• ')}`
-              : result.message;
-          toast.error(detail, "Upload Failed");
-      }
-  };
-
-  const handleDisconnect = async () => {
-      const ok = await toast.confirm({ message: "Are you sure you want to disconnect? Syncing will stop and the API key will be cleared from this session.", variant: 'danger', confirmLabel: 'Disconnect' });
-      if (!ok) return;
-      setApiConfig('', '');
-      setApiConfigState({ url: '', key: '' });
-      setConnectionHealth('disconnected');
-      setLastSynced(null);
-      toast.success('Disconnected from Cloud Database.');
   };
 
   const handleInviteUser = async (e: React.FormEvent) => {
@@ -475,7 +366,7 @@ export const Settings: React.FC = () => {
   return (
     <>
       <div className="space-y-8 animate-fade-in">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"><div><h2 className="text-4xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-slate-900 to-slate-600 mb-2">System Settings</h2><p className="text-slate-500 font-medium">Manage organization profile, users, and data</p></div><div className="flex bg-white rounded-full border border-slate-200 p-1 shadow-sm overflow-x-auto max-w-full"><button onClick={() => guardedSetTab('General')} className={`px-5 py-2 rounded-full text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'General' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-900'}`}>General</button><button onClick={() => guardedSetTab('Data')} className={`px-5 py-2 rounded-full text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'Data' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-900'}`}>Data</button><button onClick={() => guardedSetTab('SQL')} className={`px-5 py-2 rounded-full text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'SQL' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-900'}`}>Cloud Database</button>{isAdmin && <button onClick={() => guardedSetTab('Audit')} className={`px-5 py-2 rounded-full text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'Audit' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-900'}`}>Audit</button>}<button onClick={() => guardedSetTab('Features')} className={`px-5 py-2 rounded-full text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'Features' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-900'}`}>Features</button></div></div>
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"><div><h2 className="text-4xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-slate-900 to-slate-600 mb-2">System Settings</h2><p className="text-slate-500 font-medium">Manage organization profile, users, and data</p></div><div className="flex bg-white rounded-full border border-slate-200 p-1 shadow-sm overflow-x-auto max-w-full"><button onClick={() => guardedSetTab('General')} className={`px-5 py-2 rounded-full text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'General' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-900'}`}>General</button><button onClick={() => guardedSetTab('Data')} className={`px-5 py-2 rounded-full text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'Data' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-900'}`}>Data</button>{isAdmin && <button onClick={() => guardedSetTab('Audit')} className={`px-5 py-2 rounded-full text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'Audit' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-900'}`}>Audit</button>}<button onClick={() => guardedSetTab('Features')} className={`px-5 py-2 rounded-full text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'Features' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-900'}`}>Features</button></div></div>
         {activeTab === 'General' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 animate-fade-in">
           <div className="lg:col-span-2 space-y-8">
@@ -587,141 +478,24 @@ export const Settings: React.FC = () => {
                   <span className="text-blue-100 text-sm font-medium">Systems Operational</span>
                 </div>
                 <div className="space-y-2 text-xs text-blue-200/80 border-t border-white/10 pt-4 font-mono">
-                  <p>Version: <span className="text-white">{RELEASE_NOTES[0].version}</span></p>
-                  <p>Build: <span className="text-white">Production-Clean</span></p>
-                  <p>Last Update: {new Date().toLocaleDateString()}</p>
+                  <p className="flex justify-between"><span>Last synced</span><span className="text-white">{lastSynced ? new Date(lastSynced).toLocaleTimeString() : 'never'}</span></p>
+                  <p className="flex justify-between"><span>Version</span><span className="text-white">{RELEASE_NOTES[0].version}</span></p>
+                  <p className="flex justify-between"><span>Build</span><span className="text-white">Production-Clean</span></p>
                 </div>
+                <button
+                  onClick={handleResync}
+                  disabled={isPulling}
+                  className="mt-5 w-full py-2.5 bg-white/10 hover:bg-white/20 border border-white/20 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  {isPulling ? <Loader2 className="animate-spin" size={14}/> : <RefreshCw size={14}/>}
+                  {isPulling ? 'Syncing…' : 'Resync from Neon'}
+                </button>
               </div>
               <div className="absolute -bottom-12 -right-12 w-48 h-48 bg-blue-500 rounded-full blur-3xl opacity-20 group-hover:opacity-30 transition-opacity"></div>
               <div className="absolute top-0 right-0 w-32 h-32 bg-purple-500 rounded-full blur-3xl opacity-10"></div>
             </div>
           </div>
         </div>
-        )}
-        {activeTab === 'SQL' && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 animate-fade-in">
-                {/* Left Column: Connection */}
-                <div className="space-y-8">
-                    <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100 relative overflow-hidden h-full flex flex-col justify-between">
-                        <div>
-                            <div className="flex items-center gap-4 mb-6">
-                                <div className="p-3 bg-emerald-50 rounded-xl text-emerald-600 border border-emerald-100"><Database size={28} /></div>
-                                <div>
-                                    <h3 className="text-xl font-bold text-slate-800">API Connection</h3>
-                                    <p className="text-sm text-slate-500">Point at the Neon-backed API server for real-time data.</p>
-                                </div>
-                            </div>
-
-                            {(() => {
-                                const status = connectionHealth;
-                                const palette = {
-                                    verified:     { bg: 'bg-emerald-50 border-emerald-100 text-emerald-800', chip: 'bg-emerald-200 text-emerald-700', dot: 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.6)] animate-pulse', label: 'Connected & verified' },
-                                    unknown:      { bg: 'bg-amber-50 border-amber-100 text-amber-800',       chip: 'bg-amber-200 text-amber-700',       dot: 'bg-amber-500',                                                         label: 'Connected — verifying…' },
-                                    error:        { bg: 'bg-red-50 border-red-100 text-red-800',              chip: 'bg-red-200 text-red-700',           dot: 'bg-red-500',                                                           label: 'Connection error' },
-                                    disconnected: { bg: 'bg-slate-50 border-slate-100 text-slate-500',        chip: 'bg-slate-200 text-slate-400',       dot: 'bg-slate-400',                                                         label: 'Disconnected' },
-                                }[status];
-                                return (
-                                    <div className={`mb-6 p-4 rounded-xl border flex items-center gap-3 ${palette.bg}`}>
-                                        <div className={`p-2 rounded-full ${palette.chip} relative`}>
-                                            <Wifi size={20} />
-                                            <span className={`absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ${palette.dot} ring-2 ring-white`} />
-                                        </div>
-                                        <div className="flex-1">
-                                            <p className="text-xs font-bold uppercase tracking-wider mb-0.5">Connection Status</p>
-                                            <p className="text-sm font-bold">{palette.label}</p>
-                                        </div>
-                                        {lastSynced && (
-                                            <div className="text-right">
-                                                <p className="text-[10px] font-bold uppercase tracking-wider opacity-70">Last synced</p>
-                                                <p className="text-xs font-mono">{new Date(lastSynced).toLocaleString()}</p>
-                                            </div>
-                                        )}
-                                    </div>
-                                );
-                            })()}
-                            
-                            <form onSubmit={handleSaveApiConfig} className="space-y-6">
-                                <div>
-                                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">API Base URL</label>
-                                    <input
-                                        type="url"
-                                        value={apiConfig.url}
-                                        onChange={(e) => setApiConfigState({...apiConfig, url: e.target.value})}
-                                        placeholder="Leave blank for same-origin, or https://api.example.com"
-                                        className="w-full px-4 py-3 border-b-2 border-slate-100 bg-transparent text-slate-800 font-medium focus:border-slate-800 outline-none transition-colors"
-                                    />
-                                    <p className="text-[10px] text-slate-400 mt-1">Blank = same origin as this SPA. Set a URL only if the API is deployed separately.</p>
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">API Secret (optional)</label>
-                                    <div className="relative">
-                                        <input 
-                                            type={showApiKey ? "text" : "password"} 
-                                            value={apiConfig.key} 
-                                            onChange={(e) => setApiConfigState({...apiConfig, key: e.target.value})} 
-                                            placeholder="Matches API_SECRET on the server (leave blank if unset)"
-                                            className="w-full px-4 py-3 border-b-2 border-slate-100 bg-transparent text-slate-800 font-medium focus:border-slate-800 outline-none transition-colors pr-10"
-                                        />
-                                        <button type="button" onClick={() => setShowApiKey(!showApiKey)} className="absolute right-2 top-3 text-slate-400 hover:text-slate-600">
-                                            {showApiKey ? <EyeOff size={18}/> : <Eye size={18}/>}
-                                        </button>
-                                    </div>
-                                    <p className="text-[10px] text-slate-400 mt-1">Must match the <code>API_SECRET</code> env var set on the API server. Leave blank if the server runs without one.</p>
-                                </div>
-                                
-                                <div className="grid grid-cols-2 gap-4 pt-4">
-                                    <button type="button" onClick={handleManualPull} disabled={!apiConfig.url || isPulling} className="py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-bold uppercase tracking-wider transition-colors shadow-lg shadow-indigo-200 flex items-center justify-center gap-2">
-                                        {isPulling ? <Loader2 className="animate-spin" size={18}/> : <RefreshCw size={18}/>} Sync Data
-                                    </button>
-                                    <button type="button" onClick={handleForcePush} disabled={!apiConfig.url || isPushing} className="py-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-bold uppercase tracking-wider transition-colors shadow-lg shadow-emerald-200 flex items-center justify-center gap-2">
-                                        {isPushing ? <Loader2 className="animate-spin" size={18}/> : <ArrowUpCircle size={18}/>} Upload Local Data
-                                    </button>
-                                </div>
-                                <button type="button" onClick={handleDisconnect} className="w-full py-4 bg-red-50 hover:bg-red-100 text-red-600 border border-red-100 rounded-xl text-sm font-bold uppercase tracking-wider transition-colors flex items-center justify-center gap-2">
-                                    Disconnect
-                                </button>
-                            </form>
-                        </div>
-                    </div>
-                </div>
-
-                {/* Right Column: Integrity & Schema */}
-                <div className="space-y-6 flex flex-col h-full">
-                    {/* Integrity Check */}
-                    <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-                        <div className="flex justify-between items-start mb-4">
-                            <div className="flex items-center gap-3">
-                                <FileText className="text-slate-400" size={20}/>
-                                <h4 className="font-bold text-slate-700 text-sm uppercase tracking-wider">Integrity Check</h4>
-                            </div>
-                            <button onClick={handleIntegrityCheck} disabled={isVerifying} className="text-xs font-bold text-indigo-600 hover:text-indigo-800 transition-colors">
-                                {isVerifying ? 'Running...' : 'Run Test'}
-                            </button>
-                        </div>
-                        <p className="text-xs text-slate-400 italic">Click "Run Test" to compare local and remote record counts.</p>
-                    </div>
-
-                    {/* SQL Schema */}
-                    <div className="bg-slate-900 p-8 rounded-2xl shadow-xl border border-slate-800 flex-1 flex flex-col">
-                        <h3 className="text-xl font-bold text-white mb-2">Required SQL Schema</h3>
-                        <p className="text-slate-400 text-sm mb-6">Copy the SQL below and run it in the Neon SQL Editor to create the necessary tables.</p>
-                        
-                        <div className="relative bg-black rounded-xl border border-slate-800 overflow-hidden flex-1 group">
-                            <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <button 
-                                    onClick={() => { navigator.clipboard.writeText(SQL_SCRIPT); toast.success("Schema copied to clipboard!"); }}
-                                    className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-white transition-colors"
-                                >
-                                    <Code size={16}/>
-                                </button>
-                            </div>
-                            <pre className="p-4 text-xs font-mono text-emerald-400 leading-relaxed overflow-x-auto h-full scrollbar-hide">
-{SQL_SCRIPT}
-                            </pre>
-                        </div>
-                    </div>
-                </div>
-            </div>
         )}
         {activeTab === 'Data' && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-fade-in">
@@ -887,36 +661,135 @@ export const Settings: React.FC = () => {
             </div>
         )}
       </div>
-      {isInviteModalOpen && (<div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md flex items-center justify-center z-50 p-4 transition-all"><div className="bg-white/95 backdrop-blur-xl rounded-3xl shadow-2xl max-w-lg w-full border border-white/20 animate-fade-in"><div className="p-6 border-b border-slate-100 flex justify-between items-center"><h3 className="text-xl font-bold text-slate-900 flex items-center gap-2"><Mail size={20} className="text-emerald-600" /> Invite User</h3><button onClick={() => { setIsInviteModalOpen(false); setInviteError(''); }} className="p-2 hover:bg-slate-100 rounded-full transition-colors" disabled={inviteSending}><X size={20} className="text-slate-400" /></button></div><form onSubmit={handleInviteUser} className="p-8 space-y-6"><p className="text-xs text-slate-500 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">A temporary password is generated and emailed via Resend. The invitee signs in and their account activates after admin approval.</p><div className="grid grid-cols-2 gap-6"><MinimalInput label="First Name" value={inviteForm.firstName} onChange={(e: any) => { setInviteForm({...inviteForm, firstName: e.target.value}); setInviteError(''); }} required /><MinimalInput label="Last Name" value={inviteForm.lastName} onChange={(e: any) => { setInviteForm({...inviteForm, lastName: e.target.value}); setInviteError(''); }} required /></div><MinimalInput label="Email Address" type="email" value={inviteForm.email} onChange={(e: any) => { setInviteForm({...inviteForm, email: e.target.value}); setInviteError(''); }} required /><MinimalSelect label="Role" value={inviteForm.role} onChange={(e: any) => setInviteForm({...inviteForm, role: e.target.value})} options={[{value: 'Admin', label: 'Admin (Full Access)'},{value: 'Manager', label: 'Manager (No Settings)'},{value: 'Staff', label: 'Staff (Read Only)'}]} />{inviteError && <p className="text-red-500 text-xs font-bold bg-red-50 border border-red-100 rounded-lg px-3 py-2">{inviteError}</p>}<button type="submit" disabled={inviteSending} className="w-full py-4 text-white bg-emerald-600 rounded-xl hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-xl font-bold uppercase tracking-wider transition-all">{inviteSending ? <><Loader2 size={18} className="animate-spin" /> Sending…</> : <><Send size={18} /> Send Invite</>}</button></form></div></div>)}
-      {editingUser && (<div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md flex items-center justify-center z-50 p-4 transition-all"><div className="bg-white/95 backdrop-blur-xl rounded-3xl shadow-2xl max-w-lg w-full border border-white/20"><div className="p-6 border-b border-slate-100 flex justify-between items-center"><h3 className="text-xl font-bold text-slate-900">Edit User</h3><button onClick={() => setEditingUser(null)} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><X size={20} className="text-slate-400" /></button></div><form onSubmit={handleEditUser} className="p-8 space-y-6"><div className="grid grid-cols-2 gap-6"><MinimalInput label="First Name" value={editingUser.firstName} onChange={(e: any) => setEditingUser({...editingUser, firstName: e.target.value})} required /><MinimalInput label="Last Name" value={editingUser.lastName} onChange={(e: any) => setEditingUser({...editingUser, lastName: e.target.value})} required /></div><MinimalInput label="Email Address" type="email" value={editingUser.email} onChange={(e: any) => setEditingUser({...editingUser, email: e.target.value})} required /><div className="grid grid-cols-2 gap-6"><MinimalSelect label="Role" value={editingUser.role} onChange={(e: any) => setEditingUser({...editingUser, role: e.target.value as any})} options={[{value: 'Admin', label: 'Admin (Full Access)'},{value: 'Manager', label: 'Manager (No Settings)'},{value: 'Staff', label: 'Staff (Read Only)'}]} /><MinimalSelect label="Status" value={editingUser.status || 'Active'} onChange={(e: any) => setEditingUser({...editingUser, status: e.target.value as any})} options={[{value: 'Active', label: 'Active'},{value: 'Pending', label: 'Pending Approval'},{value: 'Denied', label: 'Denied / Suspended'}]} /></div>{!!currentUser && currentUser.id === editingUser.id && editingUser.role !== 'Admin' && (<p className="text-xs text-amber-600 font-semibold bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">⚠️ You're changing your own role away from Admin. You may lose access to this page after saving.</p>)}<button type="submit" className="w-full py-4 text-white bg-slate-900 rounded-xl hover:bg-slate-800 flex items-center justify-center gap-2 shadow-xl font-bold uppercase tracking-wider transition-all"><Save size={18} /> Update User</button></form></div></div>)}
-      {userToDelete && (<div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md flex items-center justify-center z-50 p-4 transition-all"><div className="bg-white/95 backdrop-blur-xl rounded-2xl shadow-2xl max-w-sm w-full border border-white/20 p-6 text-center"><div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 border-4 border-red-50"><AlertTriangle className="text-red-500" size={32}/></div><h3 className="text-xl font-bold text-slate-900 mb-2">Delete User?</h3><p className="text-slate-500 mb-6 text-sm">Are you sure you want to remove <span className="font-bold text-slate-700">{userToDelete.firstName}</span> from the system?</p><div className="flex gap-3"><button onClick={() => setUserToDelete(null)} className="flex-1 py-3 text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl font-bold uppercase text-xs tracking-wider transition-colors">Cancel</button><button onClick={handleConfirmDelete} className="flex-1 py-3 text-white bg-red-500 hover:bg-red-600 rounded-xl font-bold uppercase text-xs tracking-wider transition-colors shadow-lg shadow-red-500/30">Delete</button></div></div></div>)}
-      {isResetConfirmOpen && (
-        <div className="fixed inset-0 bg-red-900/80 backdrop-blur-md flex items-center justify-center z-50 p-4 transition-all">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 text-center">
-            <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 border-4 border-red-50"><AlertTriangle className="text-red-600" size={32}/></div>
-            <h3 className="text-xl font-black text-red-900 mb-2">CRITICAL WARNING</h3>
-            <p className="text-slate-600 mb-4 text-sm leading-relaxed">This action will <strong>PERMANENTLY DELETE</strong> all local data including clients, contracts, and financial records. This cannot be undone.</p>
-            <p className="text-xs text-slate-500 mb-2 text-left">Type <span className="font-mono font-bold text-red-700">RESET</span> to confirm:</p>
+      <AccessibleModal
+        isOpen={isInviteModalOpen}
+        onClose={() => { setIsInviteModalOpen(false); setInviteError(''); }}
+        title="Invite User"
+        description="A temporary password is generated and emailed via Resend. The invitee signs in and their account activates after admin approval."
+        size="md"
+        variant="default"
+        icon={<UserPlus size={20} />}
+        preventClose={inviteSending}
+        closeOnOverlayClick={false}
+        footer={
+          <>
+            <ModalButton variant="secondary" onClick={() => { setIsInviteModalOpen(false); setInviteError(''); }} disabled={inviteSending}>
+              Cancel
+            </ModalButton>
+            <ModalButton variant="primary" type="submit" form="invite-user-form" loading={inviteSending}>
+              Send Invite
+            </ModalButton>
+          </>
+        }
+      >
+        <form id="invite-user-form" onSubmit={handleInviteUser} className="space-y-6">
+          <div className="grid grid-cols-2 gap-6">
+            <MinimalInput label="First Name" value={inviteForm.firstName} onChange={(e: any) => { setInviteForm({...inviteForm, firstName: e.target.value}); setInviteError(''); }} required />
+            <MinimalInput label="Last Name" value={inviteForm.lastName} onChange={(e: any) => { setInviteForm({...inviteForm, lastName: e.target.value}); setInviteError(''); }} required />
+          </div>
+          <MinimalInput label="Email Address" type="email" value={inviteForm.email} onChange={(e: any) => { setInviteForm({...inviteForm, email: e.target.value}); setInviteError(''); }} required />
+          <MinimalSelect label="Role" value={inviteForm.role} onChange={(e: any) => setInviteForm({...inviteForm, role: e.target.value})} options={[{value: 'Admin', label: 'Admin (Full Access)'},{value: 'Manager', label: 'Manager (No Settings)'},{value: 'Staff', label: 'Staff (Read Only)'}]} />
+          {inviteError && <p className="text-red-500 text-xs font-bold bg-red-50 border border-red-100 rounded-lg px-3 py-2">{inviteError}</p>}
+        </form>
+      </AccessibleModal>
+      <AccessibleModal
+        isOpen={!!editingUser}
+        onClose={() => setEditingUser(null)}
+        title={`Edit ${editingUser ? `${editingUser.firstName} ${editingUser.lastName}` : 'User'}`}
+        size="lg"
+        variant="default"
+        icon={<UserCog size={20} />}
+        closeOnOverlayClick={false}
+        footer={
+          <>
+            <ModalButton variant="secondary" onClick={() => setEditingUser(null)}>
+              Cancel
+            </ModalButton>
+            <ModalButton variant="primary" type="submit" form="edit-user-form">
+              Save Changes
+            </ModalButton>
+          </>
+        }
+      >
+        {editingUser && (
+          <form id="edit-user-form" onSubmit={handleEditUser} className="space-y-6">
+            <div className="grid grid-cols-2 gap-6">
+              <MinimalInput label="First Name" value={editingUser.firstName} onChange={(e: any) => setEditingUser({...editingUser, firstName: e.target.value})} required />
+              <MinimalInput label="Last Name" value={editingUser.lastName} onChange={(e: any) => setEditingUser({...editingUser, lastName: e.target.value})} required />
+            </div>
+            <MinimalInput label="Email Address" type="email" value={editingUser.email} onChange={(e: any) => setEditingUser({...editingUser, email: e.target.value})} required />
+            <div className="grid grid-cols-2 gap-6">
+              <MinimalSelect label="Role" value={editingUser.role} onChange={(e: any) => setEditingUser({...editingUser, role: e.target.value as any})} options={[{value: 'Admin', label: 'Admin (Full Access)'},{value: 'Manager', label: 'Manager (No Settings)'},{value: 'Staff', label: 'Staff (Read Only)'}]} />
+              <MinimalSelect label="Status" value={editingUser.status || 'Active'} onChange={(e: any) => setEditingUser({...editingUser, status: e.target.value as any})} options={[{value: 'Active', label: 'Active'},{value: 'Pending', label: 'Pending Approval'},{value: 'Denied', label: 'Denied / Suspended'}]} />
+            </div>
+            {!!currentUser && currentUser.id === editingUser.id && editingUser.role !== 'Admin' && (
+              <p className="text-xs text-amber-600 font-semibold bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">You're changing your own role away from Admin. You may lose access to this page after saving.</p>
+            )}
+          </form>
+        )}
+      </AccessibleModal>
+      <AccessibleModal
+        isOpen={!!userToDelete}
+        onClose={() => setUserToDelete(null)}
+        title="Delete User"
+        description={userToDelete ? `Remove ${userToDelete.firstName} ${userToDelete.lastName} from the system? This cannot be undone.` : undefined}
+        size="sm"
+        role="alertdialog"
+        variant="danger"
+        onConfirmKey={handleConfirmDelete}
+        footer={
+          <>
+            <ModalButton variant="secondary" onClick={() => setUserToDelete(null)}>
+              Cancel
+            </ModalButton>
+            <ModalButton variant="danger" onClick={handleConfirmDelete}>
+              Delete User
+            </ModalButton>
+          </>
+        }
+      >
+        <p className="text-sm text-slate-500">
+          Are you sure you want to remove <span className="font-bold text-slate-700">{userToDelete?.firstName} {userToDelete?.lastName}</span> from the system? This action cannot be undone.
+        </p>
+      </AccessibleModal>
+      <AccessibleModal
+        isOpen={isResetConfirmOpen}
+        onClose={() => { setIsResetConfirmOpen(false); setResetConfirmText(''); }}
+        title="Reset Application Data"
+        description="This action permanently deletes all local data and cannot be undone."
+        size="sm"
+        role="alertdialog"
+        variant="danger"
+        closeOnOverlayClick={false}
+        footer={
+          <>
+            <ModalButton variant="secondary" onClick={() => { setIsResetConfirmOpen(false); setResetConfirmText(''); }}>
+              Cancel
+            </ModalButton>
+            <ModalButton variant="danger" onClick={resetSystemData} disabled={resetConfirmText !== 'RESET'}>
+              Wipe Data
+            </ModalButton>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600 leading-relaxed">
+            This action will <strong>PERMANENTLY DELETE</strong> all local data including clients, contracts, and financial records. This cannot be undone.
+          </p>
+          <div>
+            <p className="text-xs text-slate-500 mb-2">Type <span className="font-mono font-bold text-red-700">RESET</span> to confirm:</p>
             <input
               type="text"
               value={resetConfirmText}
               onChange={e => setResetConfirmText(e.target.value)}
               autoComplete="off"
               spellCheck={false}
-              className="w-full px-4 py-3 border border-red-200 rounded-xl font-mono text-sm uppercase tracking-widest focus:border-red-500 focus:ring-0 outline-none mb-6"
+              className="w-full px-4 py-3 border border-red-200 rounded-xl font-mono text-sm uppercase tracking-widest focus:border-red-500 focus:ring-0 outline-none"
               placeholder="RESET"
             />
-            <div className="flex gap-3">
-              <button onClick={() => { setIsResetConfirmOpen(false); setResetConfirmText(''); }} className="flex-1 py-3 text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl font-bold uppercase text-xs tracking-wider transition-colors">Cancel</button>
-              <button
-                onClick={resetSystemData}
-                disabled={resetConfirmText !== 'RESET'}
-                className="flex-1 py-3 text-white bg-red-600 hover:bg-red-700 rounded-xl font-bold uppercase text-xs tracking-wider transition-colors shadow-lg shadow-red-600/30 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-red-600"
-              >Wipe Data</button>
-            </div>
           </div>
         </div>
-      )}
+      </AccessibleModal>
     </>
   );
 };
