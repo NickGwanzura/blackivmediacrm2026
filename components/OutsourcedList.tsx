@@ -3,7 +3,8 @@ import React, { useState, useEffect } from 'react';
 import { getOutsourcedBillboards, getBillboards, addOutsourcedBillboard, updateOutsourcedBillboard, deleteOutsourcedBillboard } from '../services/mockData';
 import { useToast } from './Toast';
 import { OutsourcedBillboard, Billboard } from '../types';
-import { Plus, X, Edit2, Globe, DollarSign, Calendar, Save, Trash2, AlertTriangle, MapPin } from 'lucide-react';
+import { Plus, Edit2, Globe, DollarSign, Calendar, Save, Trash2, MapPin } from 'lucide-react';
+import { AccessibleModal, ModalButton } from './ui/AccessibleModal';
 
 const MinimalSelect = ({ label, value, onChange, options, disabled = false }: any) => (
   <div className="group relative pt-4 w-full">
@@ -126,66 +127,71 @@ export const OutsourcedList: React.FC = () => {
             </div>
         )}
       </div>
-      {isModalOpen && (
-        <div className="fixed inset-0 z-[200] overflow-y-auto">
-            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md transition-opacity" onClick={() => setIsModalOpen(false)} />
-            <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
-                <div className="relative transform overflow-hidden rounded-3xl bg-white text-left shadow-2xl transition-all sm:my-8 sm:w-full sm:max-w-lg border border-white/20">
-                    <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-white sticky top-0 z-10">
-                        <h3 className="text-xl font-bold text-slate-900">Assign Billboard to Partner</h3>
-                        <button onClick={() => setIsModalOpen(false)} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><X size={20} className="text-slate-400" /></button>
-                    </div>
-                    <form onSubmit={handleSave} className="p-8 space-y-6">
-                        <MinimalSelect 
-                            label="Select Billboard from Inventory" 
-                            value={currentBillboard.billboardId || ''} 
-                            onChange={(e: any) => setCurrentBillboard({...currentBillboard, billboardId: e.target.value})} 
-                            options={[
-                                {value: '', label: 'Select Asset...'}, 
-                                ...inventory.map(b => ({value: b.id, label: `${b.name} (${b.type})`}))
-                            ]}
-                        /> 
-                        
-                        {currentBillboard.billboardId && (
-                            <div className="flex items-center gap-2 text-xs text-indigo-600 bg-indigo-50 p-2 rounded-lg">
-                                <MapPin size={12}/> 
-                                {inventory.find(b => b.id === currentBillboard.billboardId)?.location}
-                            </div>
-                        )}
+      <AccessibleModal
+        isOpen={isModalOpen}
+        onClose={() => { setIsModalOpen(false); setCurrentBillboard({}); }}
+        title="Assign Billboard to Partner"
+        size="lg"
+        variant="default"
+        icon={<Globe size={20} />}
+        closeOnOverlayClick={false}
+        mobileLayout="sheet"
+        footer={
+          <>
+            <ModalButton variant="secondary" onClick={() => { setIsModalOpen(false); setCurrentBillboard({}); }}>Cancel</ModalButton>
+            <ModalButton variant="primary" type="submit" form="outsourced-form"><Save size={14} /> Save Assignment</ModalButton>
+          </>
+        }
+      >
+        <form id="outsourced-form" onSubmit={handleSave} className="space-y-6">
+          <MinimalSelect
+            label="Select Billboard from Inventory"
+            value={currentBillboard.billboardId || ''}
+            onChange={(e: any) => setCurrentBillboard({...currentBillboard, billboardId: e.target.value})}
+            options={[
+              {value: '', label: 'Select Asset...'},
+              ...inventory.map(b => ({value: b.id, label: `${b.name} (${b.type})`}))
+            ]}
+          />
 
-                        <div className="grid grid-cols-2 gap-6">
-                            <MinimalInput label="Partner Name" value={currentBillboard.mediaOwner || ''} onChange={(e: any) => setCurrentBillboard({...currentBillboard, mediaOwner: e.target.value})} required />
-                            <MinimalInput label="Partner Contact" value={currentBillboard.ownerContact || ''} onChange={(e: any) => setCurrentBillboard({...currentBillboard, ownerContact: e.target.value})} />
-                        </div>
-                        <div className="grid grid-cols-2 gap-6">
-                            <MinimalInput label="Payout / Month ($)" type="number" value={currentBillboard.monthlyPayout} onChange={(e: any) => setCurrentBillboard({...currentBillboard, monthlyPayout: Number(e.target.value)})} />
-                            <div className="space-y-4">
-                                <MinimalInput label="Start Date" type="date" value={currentBillboard.contractStart || ''} onChange={(e: any) => setCurrentBillboard({...currentBillboard, contractStart: e.target.value})} />
-                                <MinimalInput label="End Date" type="date" value={currentBillboard.contractEnd || ''} onChange={(e: any) => setCurrentBillboard({...currentBillboard, contractEnd: e.target.value})} />
-                            </div>
-                        </div>
-                        <button type="submit" className="w-full py-4 text-white bg-slate-900 rounded-xl hover:bg-slate-800 flex items-center justify-center gap-2 shadow-xl font-bold uppercase tracking-wider transition-all"><Save size={18} /> Save Assignment</button>
-                    </form>
-                </div>
+          {currentBillboard.billboardId && (
+            <div className="flex items-center gap-2 text-xs text-indigo-600 bg-indigo-50 p-2 rounded-lg">
+              <MapPin size={12} />
+              {inventory.find(b => b.id === currentBillboard.billboardId)?.location}
             </div>
-        </div>
-      )}
-      {itemToDelete && (
-        <div className="fixed inset-0 z-[200] overflow-y-auto">
-            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md transition-opacity" onClick={() => setItemToDelete(null)} />
-            <div className="flex min-h-full items-center justify-center p-4 text-center">
-                <div className="relative transform overflow-hidden rounded-2xl bg-white text-left shadow-2xl transition-all sm:my-8 sm:w-full sm:max-w-sm border border-white/20 p-6 text-center">
-                    <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 border-4 border-red-50"><AlertTriangle className="text-red-500" size={32} /></div>
-                    <h3 className="text-xl font-bold text-slate-900 mb-2">Delete Assignment?</h3>
-                    <p className="text-slate-500 mb-6 text-sm">Are you sure you want to remove the outsourced assignment for <span className="font-bold text-slate-700">{itemToDelete.billboardName}</span>?</p>
-                    <div className="flex gap-3">
-                        <button onClick={() => setItemToDelete(null)} className="flex-1 py-3 text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl font-bold uppercase text-xs tracking-wider transition-colors">Cancel</button>
-                        <button onClick={handleDeleteConfirm} className="flex-1 py-3 text-white bg-red-500 hover:bg-red-600 rounded-xl font-bold uppercase text-xs tracking-wider transition-colors shadow-lg shadow-red-500/30">Delete</button>
-                    </div>
-                </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-6">
+            <MinimalInput label="Partner Name" value={currentBillboard.mediaOwner || ''} onChange={(e: any) => setCurrentBillboard({...currentBillboard, mediaOwner: e.target.value})} required />
+            <MinimalInput label="Partner Contact" value={currentBillboard.ownerContact || ''} onChange={(e: any) => setCurrentBillboard({...currentBillboard, ownerContact: e.target.value})} />
+          </div>
+          <div className="grid grid-cols-2 gap-6">
+            <MinimalInput label="Payout / Month ($)" type="number" value={currentBillboard.monthlyPayout} onChange={(e: any) => setCurrentBillboard({...currentBillboard, monthlyPayout: Number(e.target.value)})} />
+            <div className="space-y-4">
+              <MinimalInput label="Start Date" type="date" value={currentBillboard.contractStart || ''} onChange={(e: any) => setCurrentBillboard({...currentBillboard, contractStart: e.target.value})} />
+              <MinimalInput label="End Date" type="date" value={currentBillboard.contractEnd || ''} onChange={(e: any) => setCurrentBillboard({...currentBillboard, contractEnd: e.target.value})} />
             </div>
-        </div>
-      )}
+          </div>
+        </form>
+      </AccessibleModal>
+      <AccessibleModal
+        isOpen={!!itemToDelete}
+        onClose={() => setItemToDelete(null)}
+        title="Delete Assignment?"
+        description={itemToDelete ? <>Are you sure you want to remove the outsourced assignment for <span className="font-bold text-slate-700">{itemToDelete.billboardName}</span>?</> : undefined}
+        size="sm"
+        role="alertdialog"
+        variant="danger"
+        onConfirmKey={handleDeleteConfirm}
+        footer={
+          <>
+            <ModalButton variant="secondary" onClick={() => setItemToDelete(null)}>Cancel</ModalButton>
+            <ModalButton variant="danger" onClick={handleDeleteConfirm}><Trash2 size={14} /> Delete</ModalButton>
+          </>
+        }
+      >
+        <></>
+      </AccessibleModal>
     </>
   );
 };

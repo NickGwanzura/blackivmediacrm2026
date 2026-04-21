@@ -2,7 +2,8 @@
 import React, { useState } from 'react';
 import { getExpenses, addExpense, mockPrintingJobs, getClients } from '../services/mockData';
 import { useToast } from './Toast';
-import { Printer, TrendingDown, Plus, BarChart3, Scissors, Droplets, Zap, User, X, Save, Download } from 'lucide-react';
+import { Printer, Plus, Scissors, Droplets, Zap, User, Download, Receipt } from 'lucide-react';
+import { AccessibleModal, ModalButton } from './ui/AccessibleModal';
 import { PrintingJob, Expense } from '../types';
 import { generateCostReportPDF } from '../services/pdfGenerator';
 
@@ -62,62 +63,66 @@ export const Expenses: React.FC = () => {
         {activeTab === 'Printing' && (<div className="space-y-6 animate-fade-in"><div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4"><div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all"><div className="flex items-center gap-3 mb-2 text-slate-500 text-xs font-bold uppercase tracking-wider"><Scissors size={14} /> PVC Costs</div><h3 className="text-2xl font-bold text-slate-800">${pvcTotal.toLocaleString()}</h3></div><div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all"><div className="flex items-center gap-3 mb-2 text-slate-500 text-xs font-bold uppercase tracking-wider"><Droplets size={14} /> Ink Costs</div><h3 className="text-2xl font-bold text-slate-800">${inkTotal.toLocaleString()}</h3></div><div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all"><div className="flex items-center gap-3 mb-2 text-slate-500 text-xs font-bold uppercase tracking-wider"><Zap size={14} /> Electricity</div><h3 className="text-2xl font-bold text-slate-800">${electricityTotal.toLocaleString()}</h3></div><div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all"><div className="flex items-center gap-3 mb-2 text-slate-500 text-xs font-bold uppercase tracking-wider"><User size={14} /> Operator Labor</div><h3 className="text-2xl font-bold text-slate-800">${laborTotal.toLocaleString()}</h3></div></div><div className="bg-white shadow-sm rounded-2xl border border-slate-100 overflow-hidden"><div className="p-6 border-b border-slate-50"><h3 className="text-lg font-semibold text-slate-800">Recent Printing Jobs</h3></div><div className="overflow-x-auto"><table className="w-full text-left text-sm text-slate-600 min-w-[700px]"><thead className="bg-slate-50/50"><tr><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider">Date</th><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider">Client</th><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider">Job Details</th><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider text-right">Cost</th><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider text-right">Charged</th><th className="px-6 py-4 font-bold text-xs uppercase text-slate-400 tracking-wider text-right">Profit</th></tr></thead><tbody className="divide-y divide-slate-100">{mockPrintingJobs.map(job => { const profit = job.chargedAmount - job.totalCost; return (<tr key={job.id} className="hover:bg-slate-50 transition-colors"><td className="px-6 py-4">{job.date}</td><td className="px-6 py-4 font-medium text-slate-900">{getClientName(job.clientId)}</td><td className="px-6 py-4"><p className="font-medium text-slate-800">{job.description}</p><p className="text-xs text-slate-500">{job.dimensions}</p></td><td className="px-6 py-4 text-right">${job.totalCost}</td><td className="px-6 py-4 text-right">${job.chargedAmount}</td><td className={`px-6 py-4 text-right font-bold ${profit > 0 ? 'text-green-600' : 'text-red-500'}`}>${profit}</td></tr>) })}</tbody></table></div></div></div>)}
         {activeTab === 'Reports' && (<div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-8 animate-fade-in"><h3 className="text-xl font-bold text-slate-800 mb-6">Client Printing Spend Report</h3><div className="space-y-4">{getClients().map(client => { const jobs = mockPrintingJobs.filter(j => j.clientId === client.id); const totalSpent = jobs.reduce((acc, curr) => acc + curr.chargedAmount, 0); const totalCost = jobs.reduce((acc, curr) => acc + curr.totalCost, 0); if(totalSpent === 0) return null; return (<div key={client.id} className="border border-slate-100 rounded-xl p-6 hover:shadow-md transition-all"><div className="flex justify-between items-center mb-4"><h4 className="font-bold text-slate-900 text-lg">{client.companyName}</h4><span className="text-sm font-medium text-slate-500">{jobs.length} Jobs</span></div><div className="grid grid-cols-2 md:grid-cols-4 gap-4"><div><p className="text-xs text-slate-400 font-bold uppercase">Total Billed</p><p className="text-xl font-bold text-slate-900">${totalSpent}</p></div><div><p className="text-xs text-slate-400 font-bold uppercase">Our Cost</p><p className="text-xl font-bold text-slate-700">${totalCost}</p></div><div className="md:col-span-2"><p className="text-xs text-slate-400 font-bold uppercase mb-1">Margin Analysis</p><div className="h-2 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-green-500" style={{ width: `${((totalSpent - totalCost) / totalSpent) * 100}%` }}></div></div></div></div></div>) })}</div></div>)}
       </div>
-      {isAddJobModalOpen && (
-        <div className="fixed inset-0 z-[200] overflow-y-auto">
-            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md transition-opacity" onClick={() => setIsAddJobModalOpen(false)} />
-            <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
-                <div className="relative transform overflow-hidden rounded-3xl bg-white text-left shadow-2xl transition-all sm:my-8 sm:w-full sm:max-w-2xl border border-white/20">
-                    <div className="p-6 border-b border-slate-100 sticky top-0 z-10 bg-white"><h3 className="text-xl font-bold text-slate-900">New Printing Job</h3></div>
-                    <form onSubmit={handleAddJob} className="p-8 space-y-8">
-                        <div className="grid grid-cols-2 gap-6">
-                            <div className="col-span-2"><label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">Client</label><select className="w-full px-0 py-2 border-b border-slate-200 bg-transparent text-slate-800 font-medium focus:border-slate-800 outline-none" value={newJob.clientId} onChange={(e) => setNewJob({...newJob, clientId: e.target.value})}><option value="">Select Client</option>{getClients().map(c => <option key={c.id} value={c.id}>{c.companyName}</option>)}</select></div>
-                            <div className="col-span-2"><MinimalInput label="Description / Ref" value={newJob.description} onChange={(e: any) => setNewJob({...newJob, description: e.target.value})} /></div>
-                            <MinimalInput label="Dimensions (e.g. 12x4m)" value={newJob.dimensions} onChange={(e: any) => setNewJob({...newJob, dimensions: e.target.value})} />
-                            <MinimalInput label="Billed Amount ($)" type="number" value={newJob.chargedAmount} onChange={(e: any) => setNewJob({...newJob, chargedAmount: Number(e.target.value)})} />
-                        </div>
-                        <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 space-y-4">
-                            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Internal Cost Breakdown</h4>
-                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                                <MinimalInput label="PVC Cost" type="number" value={newJob.pvcCost} onChange={(e: any) => setNewJob({...newJob, pvcCost: Number(e.target.value)})} />
-                                <MinimalInput label="Ink" type="number" value={newJob.inkCost} onChange={(e: any) => setNewJob({...newJob, inkCost: Number(e.target.value)})} />
-                                <MinimalInput label="Electricity" type="number" value={newJob.electricityCost} onChange={(e: any) => setNewJob({...newJob, electricityCost: Number(e.target.value)})} />
-                                <MinimalInput label="Operator" type="number" value={newJob.operatorCost} onChange={(e: any) => setNewJob({...newJob, operatorCost: Number(e.target.value)})} />
-                                <MinimalInput label="Welding" type="number" value={newJob.weldingCost} onChange={(e: any) => setNewJob({...newJob, weldingCost: Number(e.target.value)})} />
-                                <div className="flex flex-col justify-end"><p className="text-xs text-slate-400">Total Cost</p><p className="text-lg font-bold text-slate-800">${calculateTotalJobCost()}</p></div>
-                            </div>
-                        </div>
-                        <div className="flex gap-4">
-                            <button type="button" onClick={() => setIsAddJobModalOpen(false)} className="flex-1 py-3 text-slate-500 hover:bg-slate-50 rounded-xl font-medium">Cancel</button>
-                            <button type="submit" className="flex-1 py-3 bg-slate-900 text-white rounded-xl font-bold uppercase tracking-wider shadow-lg">Save Job</button>
-                        </div>
-                    </form>
-                </div>
+      <AccessibleModal
+        isOpen={isAddJobModalOpen}
+        onClose={() => setIsAddJobModalOpen(false)}
+        title="Log Printing Job"
+        size="xl"
+        icon={<Printer size={20} />}
+        mobileLayout="sheet"
+        closeOnOverlayClick={false}
+        footer={
+          <>
+            <ModalButton variant="secondary" onClick={() => setIsAddJobModalOpen(false)}>Cancel</ModalButton>
+            <ModalButton variant="primary" type="submit" form="add-job-form">Log Job</ModalButton>
+          </>
+        }
+      >
+        <form id="add-job-form" onSubmit={handleAddJob} className="space-y-8">
+          <div className="grid grid-cols-2 gap-6">
+            <div className="col-span-2"><label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">Client</label><select className="w-full px-0 py-2 border-b border-slate-200 bg-transparent text-slate-800 font-medium focus:border-slate-800 outline-none" value={newJob.clientId} onChange={(e) => setNewJob({...newJob, clientId: e.target.value})}><option value="">Select Client</option>{getClients().map(c => <option key={c.id} value={c.id}>{c.companyName}</option>)}</select></div>
+            <div className="col-span-2"><MinimalInput label="Description / Ref" value={newJob.description} onChange={(e: any) => setNewJob({...newJob, description: e.target.value})} /></div>
+            <MinimalInput label="Dimensions (e.g. 12x4m)" value={newJob.dimensions} onChange={(e: any) => setNewJob({...newJob, dimensions: e.target.value})} />
+            <MinimalInput label="Billed Amount ($)" type="number" value={newJob.chargedAmount} onChange={(e: any) => setNewJob({...newJob, chargedAmount: Number(e.target.value)})} />
+          </div>
+          <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 space-y-4">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Internal Cost Breakdown</h4>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+              <MinimalInput label="PVC Cost" type="number" value={newJob.pvcCost} onChange={(e: any) => setNewJob({...newJob, pvcCost: Number(e.target.value)})} />
+              <MinimalInput label="Ink" type="number" value={newJob.inkCost} onChange={(e: any) => setNewJob({...newJob, inkCost: Number(e.target.value)})} />
+              <MinimalInput label="Electricity" type="number" value={newJob.electricityCost} onChange={(e: any) => setNewJob({...newJob, electricityCost: Number(e.target.value)})} />
+              <MinimalInput label="Operator" type="number" value={newJob.operatorCost} onChange={(e: any) => setNewJob({...newJob, operatorCost: Number(e.target.value)})} />
+              <MinimalInput label="Welding" type="number" value={newJob.weldingCost} onChange={(e: any) => setNewJob({...newJob, weldingCost: Number(e.target.value)})} />
+              <div className="flex flex-col justify-end"><p className="text-xs text-slate-400">Total Cost</p><p className="text-lg font-bold text-slate-800">${calculateTotalJobCost()}</p></div>
             </div>
-        </div>
-      )}
-      {isAddExpenseModalOpen && (
-        <div className="fixed inset-0 z-[200] overflow-y-auto">
-            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md transition-opacity" onClick={() => setIsAddExpenseModalOpen(false)} />
-            <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
-                <div className="relative transform overflow-hidden rounded-3xl bg-white text-left shadow-2xl transition-all sm:my-8 sm:w-full sm:max-w-lg border border-white/20">
-                    <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-white sticky top-0 z-10">
-                        <h3 className="text-xl font-bold text-slate-900">Record Operational Expense</h3>
-                        <button onClick={() => setIsAddExpenseModalOpen(false)} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><X size={20} className="text-slate-400" /></button>
-                    </div>
-                    <form onSubmit={handleAddExpense} className="p-8 space-y-6">
-                        <MinimalSelect label="Category" value={newExpense.category} onChange={(e: any) => setNewExpense({...newExpense, category: e.target.value})} options={[{value: 'Maintenance', label: 'Maintenance & Repairs'},{value: 'Electricity', label: 'Electricity / Power'},{value: 'Labor', label: 'General Labor'},{value: 'Printing', label: 'Printing Supplies (Misc)'},{value: 'Other', label: 'Other'}]} />
-                        <MinimalInput label="Description" value={newExpense.description} onChange={(e: any) => setNewExpense({...newExpense, description: e.target.value})} required />
-                        <div className="grid grid-cols-2 gap-6">
-                            <MinimalInput label="Amount ($)" type="number" value={newExpense.amount} onChange={(e: any) => setNewExpense({...newExpense, amount: Number(e.target.value)})} required />
-                            <MinimalInput label="Date" type="date" value={newExpense.date} onChange={(e: any) => setNewExpense({...newExpense, date: e.target.value})} />
-                        </div>
-                        <MinimalInput label="Reference / Invoice No." value={newExpense.reference} onChange={(e: any) => setNewExpense({...newExpense, reference: e.target.value})} />
-                        <button type="submit" className="w-full py-4 text-white bg-slate-900 rounded-xl hover:bg-slate-800 flex items-center justify-center gap-2 shadow-xl font-bold uppercase tracking-wider transition-all"><Save size={18} /> Record Expense</button>
-                    </form>
-                </div>
-            </div>
-        </div>
-      )}
+          </div>
+        </form>
+      </AccessibleModal>
+      <AccessibleModal
+        isOpen={isAddExpenseModalOpen}
+        onClose={() => setIsAddExpenseModalOpen(false)}
+        title="Log Expense"
+        size="lg"
+        icon={<Receipt size={20} />}
+        mobileLayout="sheet"
+        closeOnOverlayClick={false}
+        footer={
+          <>
+            <ModalButton variant="secondary" onClick={() => setIsAddExpenseModalOpen(false)}>Cancel</ModalButton>
+            <ModalButton variant="primary" type="submit" form="add-expense-form">Log Expense</ModalButton>
+          </>
+        }
+      >
+        <form id="add-expense-form" onSubmit={handleAddExpense} className="space-y-6">
+          <MinimalSelect label="Category" value={newExpense.category} onChange={(e: any) => setNewExpense({...newExpense, category: e.target.value})} options={[{value: 'Maintenance', label: 'Maintenance & Repairs'},{value: 'Electricity', label: 'Electricity / Power'},{value: 'Labor', label: 'General Labor'},{value: 'Printing', label: 'Printing Supplies (Misc)'},{value: 'Other', label: 'Other'}]} />
+          <MinimalInput label="Description" value={newExpense.description} onChange={(e: any) => setNewExpense({...newExpense, description: e.target.value})} required />
+          <div className="grid grid-cols-2 gap-6">
+            <MinimalInput label="Amount ($)" type="number" value={newExpense.amount} onChange={(e: any) => setNewExpense({...newExpense, amount: Number(e.target.value)})} required />
+            <MinimalInput label="Date" type="date" value={newExpense.date} onChange={(e: any) => setNewExpense({...newExpense, date: e.target.value})} />
+          </div>
+          <MinimalInput label="Reference / Invoice No." value={newExpense.reference} onChange={(e: any) => setNewExpense({...newExpense, reference: e.target.value})} />
+        </form>
+      </AccessibleModal>
     </>
   );
 };

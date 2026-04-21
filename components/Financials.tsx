@@ -3,7 +3,8 @@ import React, { useState, useEffect } from 'react';
 import { getInvoices, getContracts, mockClients, getBillboards, addInvoice, markInvoiceAsPaid } from '../services/mockData';
 import { useToast } from './Toast';
 import { generateInvoicePDF } from '../services/pdfGenerator';
-import { FileText, Download, Printer, Plus, X, Save, Link2, CreditCard, Search, ChevronRight, Wrench, Palette } from 'lucide-react';
+import { FileText, Download, Printer, Plus, Save, Link2, CreditCard, Search, ChevronRight, Wrench, Palette } from 'lucide-react';
+import { AccessibleModal, ModalButton } from './ui/AccessibleModal';
 import { Invoice, VAT_RATE } from '../types';
 
 const MinimalInput = ({ label, value, onChange, type = "text", required = false }: any) => (
@@ -166,66 +167,69 @@ export const Financials: React.FC<FinancialsProps> = ({ initialTab = 'Invoices' 
           </div>
         </div>
       </div>
-      {isModalOpen && (
-        <div className="fixed inset-0 z-[200] overflow-y-auto">
-            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md transition-opacity" onClick={() => setIsModalOpen(false)} />
-            <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
-                <div className="relative transform overflow-hidden rounded-3xl bg-white text-left shadow-2xl transition-all sm:my-8 sm:w-full sm:max-w-2xl border border-white/20">
-                    <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-white sticky top-0 z-10">
-                        <h3 className="text-xl font-bold text-slate-900">Create New {activeTab.slice(0, -1)}</h3>
-                        <button onClick={() => setIsModalOpen(false)} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><X size={20} className="text-slate-400" /></button>
-                    </div>
-                    <form onSubmit={handleCreate} className="p-8 space-y-6">
-                        {activeTab === 'Receipts' && (<div className="p-4 bg-green-50 rounded-xl border border-green-100 mb-2"><MinimalSelect label="Link to Pending Invoice" value={selectedInvoiceToPay} onChange={(e: any) => handleInvoiceSelect(e.target.value)} options={[{value: '', label: 'Select Invoice to Pay...'}, ...getInvoices().filter(i => i.status === 'Pending' && i.type === 'Invoice').map(i => ({ value: i.id, label: `Inv #${i.id} - $${i.total} (${mockClients.find(c => c.id === i.clientId)?.companyName})`}))]}/></div>)}
-                        {activeTab !== 'Receipts' && (<div className="p-4 bg-indigo-50 rounded-xl border border-indigo-100 mb-2"><MinimalSelect label="Link to Active Rental (Optional)" value={formData.contractId} onChange={(e: any) => handleRentalSelect(e.target.value)} options={[{value: '', label: 'Select Rental to Auto-fill...'}, ...getContracts().map(c => { const client = mockClients.find(cl => cl.id === c.clientId); const billboard = getBillboards().find(b => b.id === c.billboardId); return {value: c.id, label: `${client?.companyName} - ${billboard?.name} (${c.details})`};})]}/></div>)}
-                        <div className="grid grid-cols-2 gap-6"><MinimalSelect label="Client" value={formData.clientId} onChange={(e: any) => setFormData({...formData, clientId: e.target.value})} options={[{value: '', label: 'Select Client...'}, ...mockClients.map(c => ({value: c.id, label: c.companyName}))]}/><MinimalInput label="Date" type="date" value={formData.date} onChange={(e: any) => setFormData({...formData, date: e.target.value})} /></div>
-                        {activeTab === 'Receipts' && (<div className="grid grid-cols-2 gap-6"><MinimalSelect label="Payment Method" value={formData.paymentMethod} onChange={(e: any) => setFormData({...formData, paymentMethod: e.target.value})} options={[{value: 'Bank Transfer', label: 'Bank Transfer'},{value: 'Cash', label: 'Cash'},{value: 'EcoCash', label: 'EcoCash'},{value: 'Other', label: 'Other'}]}/><MinimalInput label="Reference Number" value={formData.paymentReference} onChange={(e: any) => setFormData({...formData, paymentReference: e.target.value})} /></div>)}
-                        
-                        {/* Additional Cost Fields */}
-                        {activeTab !== 'Receipts' && (
-                            <div className="grid grid-cols-2 gap-6">
-                                <div className="flex items-end gap-2">
-                                    <div className="flex-1">
-                                        <MinimalInput label="Installation Cost ($)" type="number" value={formData.installCost} onChange={(e: any) => setFormData({...formData, installCost: e.target.value})} />
-                                    </div>
-                                    <Wrench size={20} className="text-slate-300 mb-3"/>
-                                </div>
-                                <div className="flex items-end gap-2">
-                                    <div className="flex-1">
-                                        <MinimalInput label="Printing Cost ($)" type="number" value={formData.printCost} onChange={(e: any) => setFormData({...formData, printCost: e.target.value})} />
-                                    </div>
-                                    <Palette size={20} className="text-slate-300 mb-3"/>
-                                </div>
-                            </div>
-                        )}
+      <AccessibleModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        title={`Create New ${activeTab.slice(0, -1)}`}
+        icon={<FileText size={20} />}
+        size="xl"
+        mobileLayout="sheet"
+        footer={
+          <>
+            <ModalButton variant="secondary" onClick={() => setIsModalOpen(false)}>Cancel</ModalButton>
+            <ModalButton variant="primary" type="submit" form="financial-doc-form">
+              <Save size={16} className="mr-1.5" /> Create {activeTab.slice(0, -1)}
+            </ModalButton>
+          </>
+        }
+      >
+        <form id="financial-doc-form" onSubmit={handleCreate} className="space-y-6">
+          {activeTab === 'Receipts' && (<div className="p-4 bg-green-50 rounded-xl border border-green-100 mb-2"><MinimalSelect label="Link to Pending Invoice" value={selectedInvoiceToPay} onChange={(e: any) => handleInvoiceSelect(e.target.value)} options={[{value: '', label: 'Select Invoice to Pay...'}, ...getInvoices().filter(i => i.status === 'Pending' && i.type === 'Invoice').map(i => ({ value: i.id, label: `Inv #${i.id} - $${i.total} (${mockClients.find(c => c.id === i.clientId)?.companyName})`}))]}/></div>)}
+          {activeTab !== 'Receipts' && (<div className="p-4 bg-indigo-50 rounded-xl border border-indigo-100 mb-2"><MinimalSelect label="Link to Active Rental (Optional)" value={formData.contractId} onChange={(e: any) => handleRentalSelect(e.target.value)} options={[{value: '', label: 'Select Rental to Auto-fill...'}, ...getContracts().map(c => { const client = mockClients.find(cl => cl.id === c.clientId); const billboard = getBillboards().find(b => b.id === c.billboardId); return {value: c.id, label: `${client?.companyName} - ${billboard?.name} (${c.details})`};})]}/></div>)}
+          <div className="grid grid-cols-2 gap-6"><MinimalSelect label="Client" value={formData.clientId} onChange={(e: any) => setFormData({...formData, clientId: e.target.value})} options={[{value: '', label: 'Select Client...'}, ...mockClients.map(c => ({value: c.id, label: c.companyName}))]}/><MinimalInput label="Date" type="date" value={formData.date} onChange={(e: any) => setFormData({...formData, date: e.target.value})} /></div>
+          {activeTab === 'Receipts' && (<div className="grid grid-cols-2 gap-6"><MinimalSelect label="Payment Method" value={formData.paymentMethod} onChange={(e: any) => setFormData({...formData, paymentMethod: e.target.value})} options={[{value: 'Bank Transfer', label: 'Bank Transfer'},{value: 'Cash', label: 'Cash'},{value: 'EcoCash', label: 'EcoCash'},{value: 'Other', label: 'Other'}]}/><MinimalInput label="Reference Number" value={formData.paymentReference} onChange={(e: any) => setFormData({...formData, paymentReference: e.target.value})} /></div>)}
 
-                        <div className="bg-slate-50 rounded-2xl p-6 space-y-4 border border-slate-100">
-                            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Line Items</h4>
-                            <div className="flex gap-3">
-                                <div className="flex-1"><MinimalInput label="Description" value={newItem.description} onChange={(e: any) => setNewItem({...newItem, description: e.target.value})} /></div>
-                                <div className="w-32"><MinimalInput label="Amount ($)" type="number" value={newItem.amount} onChange={(e: any) => setNewItem({...newItem, amount: Number(e.target.value)})} /></div>
-                                <button type="button" onClick={addItem} className="bg-slate-900 text-white rounded-xl px-4 mt-2 hover:bg-slate-800"><Plus size={18}/></button>
-                            </div>
-                            {(formData.items && formData.items.length > 0) || formData.installCost > 0 || formData.printCost > 0 ? (
-                                <div className="mt-4 space-y-2">
-                                    {formData.items?.map((item, idx) => (
-                                        <div key={idx} className="flex justify-between text-sm bg-white p-3 rounded-lg border border-slate-200"><span>{item.description}</span><span className="font-bold">${item.amount}</span></div>
-                                    ))}
-                                    {formData.installCost > 0 && <div className="flex justify-between text-sm bg-indigo-50 p-3 rounded-lg border border-indigo-100 text-indigo-900"><span>Installation</span><span className="font-bold">${Number(formData.installCost)}</span></div>}
-                                    {formData.printCost > 0 && <div className="flex justify-between text-sm bg-indigo-50 p-3 rounded-lg border border-indigo-100 text-indigo-900"><span>Printing / Production</span><span className="font-bold">${Number(formData.printCost)}</span></div>}
-                                </div>
-                            ) : null}
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <input type="checkbox" checked={hasVat} disabled={activeTab === 'Receipts' && !!selectedInvoiceToPay} onChange={e => setHasVat(e.target.checked)} className="rounded border-slate-300 text-slate-900 focus:ring-slate-900" />
-                            <label className="text-sm font-medium text-slate-600">Include VAT (15%)</label>
-                        </div>
-                        <button type="submit" className="w-full py-4 text-white bg-slate-900 rounded-xl hover:bg-slate-800 flex items-center justify-center gap-2 shadow-xl font-bold uppercase tracking-wider transition-all"><Save size={18} /> Create {activeTab.slice(0, -1)}</button>
-                    </form>
+          {/* Additional Cost Fields */}
+          {activeTab !== 'Receipts' && (
+            <div className="grid grid-cols-2 gap-6">
+              <div className="flex items-end gap-2">
+                <div className="flex-1">
+                  <MinimalInput label="Installation Cost ($)" type="number" value={formData.installCost} onChange={(e: any) => setFormData({...formData, installCost: e.target.value})} />
                 </div>
+                <Wrench size={20} className="text-slate-300 mb-3"/>
+              </div>
+              <div className="flex items-end gap-2">
+                <div className="flex-1">
+                  <MinimalInput label="Printing Cost ($)" type="number" value={formData.printCost} onChange={(e: any) => setFormData({...formData, printCost: e.target.value})} />
+                </div>
+                <Palette size={20} className="text-slate-300 mb-3"/>
+              </div>
             </div>
-        </div>
-      )}
+          )}
+
+          <div className="bg-slate-50 rounded-2xl p-6 space-y-4 border border-slate-100">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Line Items</h4>
+            <div className="flex gap-3">
+              <div className="flex-1"><MinimalInput label="Description" value={newItem.description} onChange={(e: any) => setNewItem({...newItem, description: e.target.value})} /></div>
+              <div className="w-32"><MinimalInput label="Amount ($)" type="number" value={newItem.amount} onChange={(e: any) => setNewItem({...newItem, amount: Number(e.target.value)})} /></div>
+              <button type="button" onClick={addItem} className="bg-slate-900 text-white rounded-xl px-4 mt-2 hover:bg-slate-800"><Plus size={18}/></button>
+            </div>
+            {(formData.items && formData.items.length > 0) || formData.installCost > 0 || formData.printCost > 0 ? (
+              <div className="mt-4 space-y-2">
+                {formData.items?.map((item, idx) => (
+                  <div key={idx} className="flex justify-between text-sm bg-white p-3 rounded-lg border border-slate-200"><span>{item.description}</span><span className="font-bold">${item.amount}</span></div>
+                ))}
+                {formData.installCost > 0 && <div className="flex justify-between text-sm bg-indigo-50 p-3 rounded-lg border border-indigo-100 text-indigo-900"><span>Installation</span><span className="font-bold">${Number(formData.installCost)}</span></div>}
+                {formData.printCost > 0 && <div className="flex justify-between text-sm bg-indigo-50 p-3 rounded-lg border border-indigo-100 text-indigo-900"><span>Printing / Production</span><span className="font-bold">${Number(formData.printCost)}</span></div>}
+              </div>
+            ) : null}
+          </div>
+          <div className="flex items-center gap-2">
+            <input type="checkbox" checked={hasVat} disabled={activeTab === 'Receipts' && !!selectedInvoiceToPay} onChange={e => setHasVat(e.target.checked)} className="rounded border-slate-300 text-slate-900 focus:ring-slate-900" />
+            <label className="text-sm font-medium text-slate-600">Include VAT (15%)</label>
+          </div>
+        </form>
+      </AccessibleModal>
     </>
   );
 };

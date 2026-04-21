@@ -5,7 +5,8 @@ import { useToast } from './Toast';
 import { generateContractPDF, generateContractsReportPDF } from '../services/pdfGenerator';
 import { emailContract } from '../services/emailService';
 import { Contract } from '../types';
-import { FileText, Calendar, CheckCircle, AlertCircle, Printer, Wrench, Download, X, Eye, Clock, Plus as PlusIcon, FileDown, Mail, Loader2 } from 'lucide-react';
+import { FileText, Calendar, CheckCircle, AlertCircle, Printer, Wrench, Download, Eye, Clock, Plus as PlusIcon, FileDown, Mail, Loader2 } from 'lucide-react';
+import { AccessibleModal, ModalButton } from './ui/AccessibleModal';
 
 export const ContractList: React.FC = () => {
   const toast = useToast();
@@ -97,7 +98,73 @@ export const ContractList: React.FC = () => {
           ))}
         </div>
       </div>
-      {selectedContract && (<div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md flex items-center justify-center z-50 p-4 transition-all"><div className="bg-white/95 backdrop-blur-xl rounded-3xl shadow-2xl max-w-lg w-full border border-white/20"><div className="p-6 border-b border-slate-100 flex justify-between items-center"><h3 className="text-xl font-bold text-slate-900">Contract Details</h3><button onClick={() => setSelectedContract(null)} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><X size={20} className="text-slate-400" /></button></div><div className="p-8 space-y-6"><div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 flex justify-between items-center"><div><p className="text-xs font-bold uppercase text-slate-400 mb-2">Lessee</p><h4 className="text-xl font-bold text-slate-900">{getClientName(selectedContract.clientId)}</h4></div><div className="text-right"><p className="text-xs font-bold uppercase text-slate-400 mb-1">Billing Day</p><span className="inline-flex items-center gap-1 px-3 py-1 bg-white border border-slate-200 rounded-lg text-sm font-bold text-slate-800 shadow-sm"><Clock size={14} className="text-emerald-500"/> {getBillingDayDisplay(selectedContract)}</span></div></div><div className="grid grid-cols-2 gap-6"><div><p className="text-xs font-bold uppercase text-slate-400 mb-1">Asset</p><p className="font-medium text-slate-800">{getBillboardName(selectedContract.billboardId)}</p><p className="text-xs text-slate-500">{selectedContract.details}</p></div><div><p className="text-xs font-bold uppercase text-slate-400 mb-1">Duration</p><p className="font-medium text-slate-900">{selectedContract.startDate}</p><p className="text-xs text-slate-500">to {selectedContract.endDate}</p></div></div><div className="space-y-2 border-t border-slate-100 pt-4"><div className="flex justify-between text-sm"><span className="text-slate-500">Monthly Rate</span><span className="font-medium">${selectedContract.monthlyRate.toLocaleString()}</span></div><div className="flex justify-between text-sm"><span className="text-slate-500">Installation Fee</span><span className="font-medium">${selectedContract.installationCost.toLocaleString()}</span></div><div className="flex justify-between text-sm"><span className="text-slate-500">Printing Costs</span><span className="font-medium">${selectedContract.printingCost.toLocaleString()}</span></div><div className="flex justify-between text-lg font-bold pt-2 text-slate-900"><span>Total Value</span><span>${selectedContract.totalContractValue.toLocaleString()}</span></div></div><button onClick={() => handleDownload(selectedContract)} className="w-full py-4 text-white bg-slate-900 rounded-xl hover:bg-slate-800 flex items-center justify-center gap-2 shadow-xl font-bold uppercase tracking-wider transition-all"><Download size={18} /> Download Contract PDF</button></div></div></div>)}
+      <AccessibleModal
+        isOpen={!!selectedContract}
+        onClose={() => setSelectedContract(null)}
+        title="Contract Details"
+        description={selectedContract ? `${getClientName(selectedContract.clientId)} — ${getBillboardName(selectedContract.billboardId)}` : undefined}
+        size="lg"
+        icon={<FileText size={20} />}
+        closeOnOverlayClick={false}
+        mobileLayout="sheet"
+        footer={
+          selectedContract ? (
+            <>
+              <ModalButton variant="secondary" onClick={() => setSelectedContract(null)}>Close</ModalButton>
+              <ModalButton variant="primary" onClick={() => handleDownload(selectedContract)}>
+                <Download size={14} /> Download PDF
+              </ModalButton>
+            </>
+          ) : undefined
+        }
+      >
+        {selectedContract && (
+          <div className="space-y-6">
+            <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 flex justify-between items-center">
+              <div>
+                <p className="text-xs font-bold uppercase text-slate-400 mb-2">Lessee</p>
+                <h4 className="text-xl font-bold text-slate-900">{getClientName(selectedContract.clientId)}</h4>
+              </div>
+              <div className="text-right">
+                <p className="text-xs font-bold uppercase text-slate-400 mb-1">Billing Day</p>
+                <span className="inline-flex items-center gap-1 px-3 py-1 bg-white border border-slate-200 rounded-lg text-sm font-bold text-slate-800 shadow-sm">
+                  <Clock size={14} className="text-emerald-500" /> {getBillingDayDisplay(selectedContract)}
+                </span>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-6">
+              <div>
+                <p className="text-xs font-bold uppercase text-slate-400 mb-1">Asset</p>
+                <p className="font-medium text-slate-800">{getBillboardName(selectedContract.billboardId)}</p>
+                <p className="text-xs text-slate-500">{selectedContract.details}</p>
+              </div>
+              <div>
+                <p className="text-xs font-bold uppercase text-slate-400 mb-1">Duration</p>
+                <p className="font-medium text-slate-900">{selectedContract.startDate}</p>
+                <p className="text-xs text-slate-500">to {selectedContract.endDate}</p>
+              </div>
+            </div>
+            <div className="space-y-2 border-t border-slate-100 pt-4">
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-500">Monthly Rate</span>
+                <span className="font-medium">${selectedContract.monthlyRate.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-500">Installation Fee</span>
+                <span className="font-medium">${selectedContract.installationCost.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-500">Printing Costs</span>
+                <span className="font-medium">${selectedContract.printingCost.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between text-lg font-bold pt-2 text-slate-900">
+                <span>Total Value</span>
+                <span>${selectedContract.totalContractValue.toLocaleString()}</span>
+              </div>
+            </div>
+          </div>
+        )}
+      </AccessibleModal>
     </>
   );
 };

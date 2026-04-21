@@ -6,7 +6,8 @@ import { generateContractPDF, generateMasterContractPDF, generateActiveRentalsPD
 import { emailContract } from '../services/emailService';
 import { generateRentalProposal } from '../services/aiService';
 import { Contract, BillboardType, VAT_RATE, Invoice } from '../types';
-import { FileText, Calendar, Download, Eye, Plus, X, Wand2, RefreshCw, CheckCircle, Trash2, AlertTriangle, Sparkles, Layers, ShoppingCart, MinusCircle, FileDown, Mail, Loader2 } from 'lucide-react';
+import { FileText, Calendar, Download, Eye, Plus, Wand2, RefreshCw, CheckCircle, Trash2, Sparkles, Layers, ShoppingCart, MinusCircle, FileDown, Mail, Loader2, Receipt } from 'lucide-react';
+import { AccessibleModal, ModalButton } from './ui/AccessibleModal';
 
 const MinimalInput = ({ label, value, onChange, type = "text", required = false, disabled = false }: any) => {
   const isDate = type === 'date';
@@ -494,207 +495,207 @@ export const Rentals: React.FC = () => {
         </div>
       </div>
 
-      {isCreateModalOpen && (
-        <div className="fixed inset-0 z-[200] overflow-y-auto">
-            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md transition-opacity" onClick={() => { setIsCreateModalOpen(false); resetForm(); }} />
-            <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
-                <div className={`relative transform overflow-hidden rounded-3xl bg-white text-left shadow-2xl transition-all sm:my-8 w-full ${isBatchMode ? 'max-w-5xl' : 'max-w-4xl'} border border-white/20`}>
-                    
-                    {/* Modal Header with Mode Toggle */}
-                    <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-white/50 sticky top-0 z-10">
-                        <div className="flex items-center gap-4">
-                            <h3 className="text-xl font-bold text-slate-900">New Rental</h3>
-                            <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200">
-                                <button onClick={() => setIsBatchMode(false)} className={`px-3 py-1 text-xs font-bold uppercase rounded-md transition-all ${!isBatchMode ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-700'}`}>Single Asset</button>
-                                <button onClick={() => setIsBatchMode(true)} className={`px-3 py-1 text-xs font-bold uppercase rounded-md transition-all flex items-center gap-1 ${isBatchMode ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-700'}`}><Layers size={12}/> Batch Mode</button>
-                            </div>
+      <AccessibleModal
+        isOpen={isCreateModalOpen}
+        onClose={() => { setIsCreateModalOpen(false); resetForm(); }}
+        title="New Rental Contract"
+        icon={<Receipt size={20} />}
+        size="xxl"
+        variant="default"
+        closeOnOverlayClick={false}
+        mobileLayout="sheet"
+        footer={
+          <>
+            <ModalButton variant="secondary" onClick={() => { setIsCreateModalOpen(false); resetForm(); }}>
+              Cancel
+            </ModalButton>
+            <ModalButton
+              variant="primary"
+              onClick={isBatchMode ? handleBatchCreate : undefined}
+              type={isBatchMode ? 'button' : 'submit'}
+              form={isBatchMode ? undefined : 'rental-create-form'}
+            >
+              {isBatchMode ? <><Layers size={14} /> Create Batch</> : 'Create Rental'}
+            </ModalButton>
+          </>
+        }
+      >
+        {/* Single/Batch mode toggle — placed at top of body so it's visually connected to the form it controls */}
+        <div className="flex items-center gap-3 pb-4 mb-2 border-b border-slate-100">
+            <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200">
+                <button type="button" onClick={() => setIsBatchMode(false)} className={`px-3 py-1 text-xs font-bold uppercase rounded-md transition-all ${!isBatchMode ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-700'}`}>Single Asset</button>
+                <button type="button" onClick={() => setIsBatchMode(true)} className={`px-3 py-1 text-xs font-bold uppercase rounded-md transition-all flex items-center gap-1 ${isBatchMode ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-700'}`}><Layers size={12}/> Batch Mode</button>
+            </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2">
+            {/* Form Side */}
+            <div className={`space-y-6 sm:space-y-8 pr-0 lg:pr-8 lg:border-r border-slate-100 ${isBatchMode ? 'lg:col-span-2' : ''}`}>
+                <form id="rental-create-form" onSubmit={isBatchMode ? (e) => e.preventDefault() : handleSingleCreate}>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                        <MinimalSelect label="Select Client" value={formData.clientId} onChange={(e: any) => setFormData(prev => ({...prev, clientId: e.target.value}))} options={[{value: '', label: 'Select Client...'}, ...mockClients.map(c => ({value: c.id, label: c.companyName}))]} disabled={isBatchMode && batchItems.length > 0} />
+
+                        <div className="flex gap-4">
+                            <MinimalInput label="Start Date" type="date" value={formData.startDate} onChange={(e: any) => setFormData(prev => ({...prev, startDate: e.target.value}))} required disabled={isBatchMode && batchItems.length > 0} />
+                            <MinimalInput label="End Date" type="date" value={formData.endDate} onChange={(e: any) => setFormData(prev => ({...prev, endDate: e.target.value}))} required disabled={isBatchMode && batchItems.length > 0} />
                         </div>
-                        <button onClick={() => { setIsCreateModalOpen(false); resetForm(); }} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><X size={20} className="text-slate-400" /></button>
                     </div>
 
-                    <div className="grid grid-cols-1 lg:grid-cols-2">
-                        {/* Form Side */}
-                        <div className={`p-6 sm:p-8 space-y-6 sm:space-y-8 border-r border-slate-100 ${isBatchMode ? 'lg:col-span-2' : ''}`}>
-                            <form onSubmit={isBatchMode ? (e) => e.preventDefault() : handleSingleCreate}>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                                    <MinimalSelect label="Select Client" value={formData.clientId} onChange={(e: any) => setFormData(prev => ({...prev, clientId: e.target.value}))} options={[{value: '', label: 'Select Client...'}, ...mockClients.map(c => ({value: c.id, label: c.companyName}))]} disabled={isBatchMode && batchItems.length > 0} />
-                                    
-                                    <div className="flex gap-4">
-                                        <MinimalInput label="Start Date" type="date" value={formData.startDate} onChange={(e: any) => setFormData(prev => ({...prev, startDate: e.target.value}))} required disabled={isBatchMode && batchItems.length > 0} />
-                                        <MinimalInput label="End Date" type="date" value={formData.endDate} onChange={(e: any) => setFormData(prev => ({...prev, endDate: e.target.value}))} required disabled={isBatchMode && batchItems.length > 0} />
-                                    </div>
-                                </div>
-
-                                <div className={`p-6 bg-slate-50 rounded-2xl border border-slate-100 space-y-6 ${isBatchMode ? 'mb-8' : ''}`}>
-                                    <div className="flex justify-between items-center">
-                                        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">{isBatchMode ? 'Add Asset to Batch' : 'Asset Details'}</h4>
-                                        {isBatchMode && <span className="text-[10px] text-slate-400 font-medium">Step 2: Build Cart</span>}
-                                    </div>
-                                    
-                                    <MinimalSelect 
-                                        label="Select Billboard" 
-                                        value={formData.billboardId} 
-                                        onChange={(e: React.ChangeEvent<HTMLSelectElement>) => { 
-                                            const val = e.target.value;
-                                            setFormData(prev => ({...prev, billboardId: val})); 
-                                        }} 
-                                        options={[{value: '', label: 'Select Billboard...'}, ...billboards.map(b => ({value: b.id, label: `${b.name} (${b.type})`}))]} 
-                                    />
-
-                                    {selectedBillboard && (
-                                        <>
-                                            {!isBatchMode && (
-                                                <div className="bg-indigo-50/50 p-4 rounded-xl border border-indigo-100 text-sm text-indigo-800 animate-fade-in">
-                                                    <div className="flex items-center gap-2 font-bold mb-1"><Sparkles size={14}/> <span>Visibility Insight</span></div>
-                                                    <p className="opacity-80 leading-relaxed text-xs">{selectedBillboard.visibility || "No data."}</p>
-                                                </div>
-                                            )}
-
-                                            {selectedBillboard.type === BillboardType.Static && (
-                                                <div className="flex flex-col sm:flex-row gap-4">
-                                                    {(['A', 'B', 'Both'] as const).map(side => {
-                                                        const available = isSideAvailable(side);
-                                                        let price = 0;
-                                                        if(side === 'A') price = selectedBillboard.sideARate || 0;
-                                                        else if(side === 'B') price = selectedBillboard.sideBRate || 0;
-                                                        else price = (selectedBillboard.sideARate || 0) + (selectedBillboard.sideBRate || 0);
-
-                                                        const isSelected = formData.side === side;
-                                                        return (
-                                                            <label key={side} className={`flex-1 relative cursor-pointer border rounded-xl p-3 text-center transition-all ${!available ? 'opacity-40 bg-slate-100 cursor-not-allowed border-slate-100' : isSelected ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-500 shadow-sm' : 'border-slate-200 hover:border-slate-300'}`}>
-                                                                <input type="radio" name="side" className="hidden" disabled={!available} checked={isSelected} onChange={() => available && setFormData(prev => ({...prev, side, monthlyRate: price}))} />
-                                                                <div className="font-bold text-slate-800">{side === 'Both' ? 'Both A&B' : `Side ${side}`}</div>
-                                                                <div className="text-xs text-slate-500">${price.toLocaleString()}</div>
-                                                                {!available && <div className="text-[10px] text-red-500 font-bold uppercase mt-1">Occupied</div>}
-                                                                {isSelected && <div className="absolute top-2 right-2 text-blue-500"><CheckCircle size={14}/></div>}
-                                                            </label>
-                                                        )
-                                                    })}
-                                                </div>
-                                            )}
-                                            {selectedBillboard.type === BillboardType.LED && (
-                                                <MinimalSelect label="Select Slot" value={formData.slotNumber} onChange={(e: any) => setFormData(prev => ({...prev, slotNumber: Number(e.target.value)}))} options={Array.from({length: selectedBillboard.totalSlots || 10}, (_, i) => ({value: i+1, label: `Slot ${i+1}`}))} />
-                                            )}
-
-                                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-                                                <MinimalInput label="Monthly Rate ($)" type="number" value={formData.monthlyRate} onChange={(e: any) => setFormData(prev => ({...prev, monthlyRate: Number(e.target.value)}))} />
-                                                <MinimalInput label="Install Fee ($)" type="number" value={formData.installationCost} onChange={(e: any) => setFormData(prev => ({...prev, installationCost: Number(e.target.value)}))} />
-                                                <MinimalInput label="Print Cost ($)" type="number" value={formData.printingCost} onChange={(e: any) => setFormData(prev => ({...prev, printingCost: Number(e.target.value)}))} />
-                                            </div>
-                                        </>
-                                    )}
-                                    
-                                    {isBatchMode && (
-                                        <div className="flex justify-end items-center gap-3 border-t border-slate-200 pt-4">
-                                            {batchItems.length > 0 && (
-                                                <span className="text-xs text-slate-400">Add asset to cart below</span>
-                                            )}
-                                            <button onClick={addToBatch} disabled={!selectedBillboard} className="bg-slate-900 text-white px-6 py-2 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-slate-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-md">
-                                                Add to Batch Cart
-                                            </button>
-                                        </div>
-                                    )}
-                                </div>
-
-                                {isBatchMode && batchItems.length > 0 && (
-                                    <div className="mb-8 animate-fade-in bg-slate-50 p-4 rounded-2xl border border-slate-200">
-                                        <div className="flex items-center gap-2 mb-4">
-                                            <ShoppingCart size={18} className="text-indigo-600"/>
-                                            <h4 className="text-sm font-bold text-slate-900">Batch Cart ({batchItems.length} Items)</h4>
-                                        </div>
-                                        <div className="border border-slate-200 rounded-xl overflow-hidden bg-white">
-                                            <table className="w-full text-left text-xs text-slate-600">
-                                                <thead className="bg-slate-50 border-b border-slate-200 font-bold uppercase text-slate-400">
-                                                    <tr>
-                                                        <th className="px-4 py-3">Asset</th>
-                                                        <th className="px-4 py-3">Details</th>
-                                                        <th className="px-4 py-3 text-right">Monthly</th>
-                                                        <th className="px-4 py-3 text-center">Action</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody className="divide-y divide-slate-100">
-                                                    {batchItems.map((item) => (
-                                                        <tr key={item.tempId} className="hover:bg-slate-50/50">
-                                                            <td className="px-4 py-3 font-bold text-slate-800">{getBillboardName(item.billboardId)}</td>
-                                                            <td className="px-4 py-3">{item.details}</td>
-                                                            <td className="px-4 py-3 text-right">${item.monthlyRate.toLocaleString()}</td>
-                                                            <td className="px-4 py-3 text-center">
-                                                                <button onClick={() => removeFromBatch(item.tempId)} className="text-red-400 hover:text-red-600 p-1"><MinusCircle size={16}/></button>
-                                                            </td>
-                                                        </tr>
-                                                    ))}
-                                                    <tr className="bg-slate-50 font-bold text-slate-900">
-                                                        <td className="px-4 py-3 text-right" colSpan={2}>Total Monthly:</td>
-                                                        <td className="px-4 py-3 text-right">${batchItems.reduce((acc, i) => acc + i.monthlyRate, 0).toLocaleString()}</td>
-                                                        <td></td>
-                                                    </tr>
-                                                </tbody>
-                                            </table>
-                                        </div>
-                                    </div>
-                                )}
-
-                                <div className="flex items-center gap-2 mb-6">
-                                    <input type="checkbox" checked={formData.hasVat} onChange={e => setFormData(prev => ({...prev, hasVat: e.target.checked}))} className="rounded border-slate-300 text-slate-900 focus:ring-slate-900"/>
-                                    <label className="text-sm font-medium text-slate-600">Include VAT (15%) in final Invoice</label>
-                                </div>
-
-                                {isBatchMode ? (
-                                    <button type="button" onClick={handleBatchCreate} className="w-full py-4 text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 flex items-center justify-center gap-2 shadow-xl shadow-indigo-200 font-bold uppercase tracking-wider transition-all hover:scale-[1.01]">
-                                        <Layers size={18} /> Confirm Batch & Generate Docs
-                                    </button>
-                                ) : (
-                                    <button type="submit" className="w-full py-4 text-white bg-slate-900 rounded-xl hover:bg-slate-800 flex items-center justify-center gap-2 shadow-xl font-bold uppercase tracking-wider transition-all hover:scale-[1.01]">
-                                        Generate Contract & Invoice
-                                    </button>
-                                )}
-                            </form>
+                    <div className={`p-6 bg-slate-50 rounded-2xl border border-slate-100 space-y-6 ${isBatchMode ? 'mb-8' : ''}`}>
+                        <div className="flex justify-between items-center">
+                            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">{isBatchMode ? 'Add Asset to Batch' : 'Asset Details'}</h4>
+                            {isBatchMode && <span className="text-[10px] text-slate-400 font-medium">Step 2: Build Cart</span>}
                         </div>
 
-                        {/* AI / Info Side - Only visible in Single Mode */}
-                        {!isBatchMode && (
-                            <div className="p-8 bg-slate-50/50 flex flex-col">
-                                <div className="flex items-center gap-2 mb-4">
-                                    <div className="p-2 bg-purple-100 rounded-lg text-purple-600"><Wand2 size={20}/></div>
-                                    <div>
-                                        <h4 className="font-bold text-slate-800">AI Proposal Draft</h4>
-                                        <p className="text-xs text-slate-500">Generate a pitch email for this rental</p>
+                        <MinimalSelect
+                            label="Select Billboard"
+                            value={formData.billboardId}
+                            onChange={(e: React.ChangeEvent<HTMLSelectElement>) => {
+                                const val = e.target.value;
+                                setFormData(prev => ({...prev, billboardId: val}));
+                            }}
+                            options={[{value: '', label: 'Select Billboard...'}, ...billboards.map(b => ({value: b.id, label: `${b.name} (${b.type})`}))]}
+                        />
+
+                        {selectedBillboard && (
+                            <>
+                                {!isBatchMode && (
+                                    <div className="bg-indigo-50/50 p-4 rounded-xl border border-indigo-100 text-sm text-indigo-800 animate-fade-in">
+                                        <div className="flex items-center gap-2 font-bold mb-1"><Sparkles size={14}/> <span>Visibility Insight</span></div>
+                                        <p className="opacity-80 leading-relaxed text-xs">{selectedBillboard.visibility || "No data."}</p>
                                     </div>
+                                )}
+
+                                {selectedBillboard.type === BillboardType.Static && (
+                                    <div className="flex flex-col sm:flex-row gap-4">
+                                        {(['A', 'B', 'Both'] as const).map(side => {
+                                            const available = isSideAvailable(side);
+                                            let price = 0;
+                                            if(side === 'A') price = selectedBillboard.sideARate || 0;
+                                            else if(side === 'B') price = selectedBillboard.sideBRate || 0;
+                                            else price = (selectedBillboard.sideARate || 0) + (selectedBillboard.sideBRate || 0);
+
+                                            const isSelected = formData.side === side;
+                                            return (
+                                                <label key={side} className={`flex-1 relative cursor-pointer border rounded-xl p-3 text-center transition-all ${!available ? 'opacity-40 bg-slate-100 cursor-not-allowed border-slate-100' : isSelected ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-500 shadow-sm' : 'border-slate-200 hover:border-slate-300'}`}>
+                                                    <input type="radio" name="side" className="hidden" disabled={!available} checked={isSelected} onChange={() => available && setFormData(prev => ({...prev, side, monthlyRate: price}))} />
+                                                    <div className="font-bold text-slate-800">{side === 'Both' ? 'Both A&B' : `Side ${side}`}</div>
+                                                    <div className="text-xs text-slate-500">${price.toLocaleString()}</div>
+                                                    {!available && <div className="text-[10px] text-red-500 font-bold uppercase mt-1">Occupied</div>}
+                                                    {isSelected && <div className="absolute top-2 right-2 text-blue-500"><CheckCircle size={14}/></div>}
+                                                </label>
+                                            )
+                                        })}
+                                    </div>
+                                )}
+                                {selectedBillboard.type === BillboardType.LED && (
+                                    <MinimalSelect label="Select Slot" value={formData.slotNumber} onChange={(e: any) => setFormData(prev => ({...prev, slotNumber: Number(e.target.value)}))} options={Array.from({length: selectedBillboard.totalSlots || 10}, (_, i) => ({value: i+1, label: `Slot ${i+1}`}))} />
+                                )}
+
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+                                    <MinimalInput label="Monthly Rate ($)" type="number" value={formData.monthlyRate} onChange={(e: any) => setFormData(prev => ({...prev, monthlyRate: Number(e.target.value)}))} />
+                                    <MinimalInput label="Install Fee ($)" type="number" value={formData.installationCost} onChange={(e: any) => setFormData(prev => ({...prev, installationCost: Number(e.target.value)}))} />
+                                    <MinimalInput label="Print Cost ($)" type="number" value={formData.printingCost} onChange={(e: any) => setFormData(prev => ({...prev, printingCost: Number(e.target.value)}))} />
                                 </div>
-                                <div className="flex-1 bg-white rounded-xl border border-slate-200 p-4 shadow-inner mb-4 overflow-y-auto min-h-[200px] text-sm text-slate-600 whitespace-pre-wrap leading-relaxed">
-                                    {aiProposal || "Select a client and billboard, then click 'Generate' to create a professional pitch draft..."}
-                                </div>
-                                <button type="button" onClick={handleGenerateProposal} disabled={isGenerating} className="w-full py-3 bg-white border border-slate-200 text-slate-700 font-bold uppercase tracking-wider rounded-xl hover:bg-slate-50 transition-colors flex items-center justify-center gap-2">
-                                    {isGenerating ? <RefreshCw size={16} className="animate-spin"/> : <Wand2 size={16} />} {isGenerating ? 'Drafting...' : 'Generate Proposal'}
+                            </>
+                        )}
+
+                        {isBatchMode && (
+                            <div className="flex justify-end items-center gap-3 border-t border-slate-200 pt-4">
+                                {batchItems.length > 0 && (
+                                    <span className="text-xs text-slate-400">Add asset to cart below</span>
+                                )}
+                                <button type="button" onClick={addToBatch} disabled={!selectedBillboard} className="bg-slate-900 text-white px-6 py-2 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-slate-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-md">
+                                    Add to Batch Cart
                                 </button>
                             </div>
                         )}
                     </div>
-                </div>
-            </div>
-        </div>
-      )}
 
-      {rentalToDelete && (
-        <div className="fixed inset-0 z-[200] overflow-y-auto">
-          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md transition-opacity" onClick={() => setRentalToDelete(null)} />
-          <div className="flex min-h-full items-center justify-center p-4 text-center">
-              <div className="relative transform overflow-hidden rounded-2xl bg-white text-left shadow-2xl transition-all sm:my-8 sm:w-full sm:max-w-sm border border-white/20 p-6 text-center">
-                 <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 border-4 border-red-50">
-                    <AlertTriangle className="text-red-500" size={32} />
-                 </div>
-                 <h3 className="text-xl font-bold text-slate-900 mb-2">Delete Rental?</h3>
-                 <p className="text-slate-500 mb-6 text-sm">
-                   Are you sure you want to delete the rental agreement for <span className="font-bold text-slate-700">{getClientName(rentalToDelete.clientId)}</span>?
-                 </p>
-                 <div className="flex gap-3">
-                   <button onClick={() => setRentalToDelete(null)} className="flex-1 py-3 text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl font-bold uppercase text-xs tracking-wider transition-colors">Cancel</button>
-                   <button onClick={confirmDelete} className="flex-1 py-3 text-white bg-red-500 hover:bg-red-600 rounded-xl font-bold uppercase text-xs tracking-wider transition-colors shadow-lg shadow-red-500/30">Delete</button>
-                 </div>
-              </div>
-          </div>
+                    {isBatchMode && batchItems.length > 0 && (
+                        <div className="mb-8 animate-fade-in bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                            <div className="flex items-center gap-2 mb-4">
+                                <ShoppingCart size={18} className="text-indigo-600"/>
+                                <h4 className="text-sm font-bold text-slate-900">Batch Cart ({batchItems.length} Items)</h4>
+                            </div>
+                            <div className="border border-slate-200 rounded-xl overflow-hidden bg-white">
+                                <table className="w-full text-left text-xs text-slate-600">
+                                    <thead className="bg-slate-50 border-b border-slate-200 font-bold uppercase text-slate-400">
+                                        <tr>
+                                            <th className="px-4 py-3">Asset</th>
+                                            <th className="px-4 py-3">Details</th>
+                                            <th className="px-4 py-3 text-right">Monthly</th>
+                                            <th className="px-4 py-3 text-center">Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                        {batchItems.map((item) => (
+                                            <tr key={item.tempId} className="hover:bg-slate-50/50">
+                                                <td className="px-4 py-3 font-bold text-slate-800">{getBillboardName(item.billboardId)}</td>
+                                                <td className="px-4 py-3">{item.details}</td>
+                                                <td className="px-4 py-3 text-right">${item.monthlyRate.toLocaleString()}</td>
+                                                <td className="px-4 py-3 text-center">
+                                                    <button type="button" onClick={() => removeFromBatch(item.tempId)} className="text-red-400 hover:text-red-600 p-1"><MinusCircle size={16}/></button>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                        <tr className="bg-slate-50 font-bold text-slate-900">
+                                            <td className="px-4 py-3 text-right" colSpan={2}>Total Monthly:</td>
+                                            <td className="px-4 py-3 text-right">${batchItems.reduce((acc, i) => acc + i.monthlyRate, 0).toLocaleString()}</td>
+                                            <td></td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    )}
+
+                    <div className="flex items-center gap-2 mb-6 mt-6">
+                        <input type="checkbox" checked={formData.hasVat} onChange={e => setFormData(prev => ({...prev, hasVat: e.target.checked}))} className="rounded border-slate-300 text-slate-900 focus:ring-slate-900"/>
+                        <label className="text-sm font-medium text-slate-600">Include VAT (15%) in final Invoice</label>
+                    </div>
+                </form>
+            </div>
+
+            {/* AI / Info Side - Only visible in Single Mode */}
+            {!isBatchMode && (
+                <div className="pt-6 lg:pt-0 lg:pl-8 bg-slate-50/50 flex flex-col">
+                    <div className="flex items-center gap-2 mb-4">
+                        <div className="p-2 bg-purple-100 rounded-lg text-purple-600"><Wand2 size={20}/></div>
+                        <div>
+                            <h4 className="font-bold text-slate-800">AI Proposal Draft</h4>
+                            <p className="text-xs text-slate-500">Generate a pitch email for this rental</p>
+                        </div>
+                    </div>
+                    <div className="flex-1 bg-white rounded-xl border border-slate-200 p-4 shadow-inner mb-4 overflow-y-auto min-h-[200px] text-sm text-slate-600 whitespace-pre-wrap leading-relaxed">
+                        {aiProposal || "Select a client and billboard, then click 'Generate' to create a professional pitch draft..."}
+                    </div>
+                    <button type="button" onClick={handleGenerateProposal} disabled={isGenerating} className="w-full py-3 bg-white border border-slate-200 text-slate-700 font-bold uppercase tracking-wider rounded-xl hover:bg-slate-50 transition-colors flex items-center justify-center gap-2">
+                        {isGenerating ? <RefreshCw size={16} className="animate-spin"/> : <Wand2 size={16} />} {isGenerating ? 'Drafting...' : 'Generate Proposal'}
+                    </button>
+                </div>
+            )}
         </div>
-      )}
+      </AccessibleModal>
+
+      <AccessibleModal
+        isOpen={!!rentalToDelete}
+        onClose={() => setRentalToDelete(null)}
+        size="sm"
+        role="alertdialog"
+        variant="danger"
+        title="Delete Rental?"
+        description={`Are you sure you want to delete the rental agreement for ${rentalToDelete ? getClientName(rentalToDelete.clientId) : ''}?`}
+        onConfirmKey={confirmDelete}
+        footer={
+          <>
+            <ModalButton variant="secondary" onClick={() => setRentalToDelete(null)}>Cancel</ModalButton>
+            <ModalButton variant="danger" onClick={confirmDelete}>Delete</ModalButton>
+          </>
+        }
+      >
+        <></>
+      </AccessibleModal>
     </>
   );
 };

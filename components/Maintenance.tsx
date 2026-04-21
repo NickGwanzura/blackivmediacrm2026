@@ -4,7 +4,8 @@ import { getBillboards, getMaintenanceLogs, addMaintenanceLog, runMaintenanceSch
 import { useToast } from './Toast';
 import { generateMaintenanceReportPDF } from '../services/pdfGenerator';
 import { MaintenanceLog } from '../types';
-import { Wrench, CheckCircle, AlertTriangle, XCircle, Search, Plus, Calendar, Save, History, FileText, X, RefreshCw, Download } from 'lucide-react';
+import { Wrench, CheckCircle, AlertTriangle, XCircle, Search, Plus, Calendar, Save, History, FileText, RefreshCw, Download } from 'lucide-react';
+import { AccessibleModal, ModalButton } from './ui/AccessibleModal';
 
 const MinimalInput = ({ label, value, onChange, type = "text", required = false }: any) => (
   <div className="group relative">
@@ -189,36 +190,42 @@ export const Maintenance: React.FC = () => {
                 </div>
             </div>
 
-            {isLogModalOpen && (
-                <div className="fixed inset-0 z-[200] overflow-y-auto">
-                    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md transition-opacity" onClick={() => setIsLogModalOpen(false)} />
-                    <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
-                        <div className="relative transform overflow-hidden rounded-3xl bg-white text-left shadow-2xl transition-all sm:my-8 sm:w-full sm:max-w-lg border border-white/20">
-                            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-white sticky top-0 z-10">
-                                <h3 className="text-xl font-bold text-slate-900">Log Maintenance Check</h3>
-                                <button onClick={() => setIsLogModalOpen(false)} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><X size={20} className="text-slate-400" /></button>
-                            </div>
-                            <form onSubmit={handleSaveLog} className="p-8 space-y-6">
-                                <MinimalSelect label="Select Billboard" value={newLog.billboardId} onChange={(e: any) => setNewLog({...newLog, billboardId: e.target.value})} options={[{value:'', label: 'Select Asset...'}, ...billboards.map(b => ({value: b.id, label: b.name}))]} />
-                                <div className="grid grid-cols-2 gap-6">
-                                    <MinimalInput label="Date Checked" type="date" value={newLog.date} onChange={(e: any) => setNewLog({...newLog, date: e.target.value})} />
-                                    <MinimalSelect label="Check Type" value={newLog.type} onChange={(e: any) => setNewLog({...newLog, type: e.target.value})} options={[{value:'Visual Check', label:'Visual Check'}, {value:'Structural', label:'Structural Safety'}, {value:'Electrical', label:'Electrical / Light'}, {value:'Cleaning', label:'Cleaning'}, {value:'Repair', label:'Repair'}]} />
-                                </div>
-                                <div className="grid grid-cols-2 gap-6">
-                                    <MinimalInput label="Technician Name" value={newLog.technician} onChange={(e: any) => setNewLog({...newLog, technician: e.target.value})} required />
-                                    <MinimalSelect label="Result Status" value={newLog.status} onChange={(e: any) => setNewLog({...newLog, status: e.target.value})} options={[{value:'Pass', label:'Pass (Good)'}, {value:'Needs Attention', label:'Needs Attention'}, {value:'Fail', label:'Fail (Critical)'}]} />
-                                </div>
-                                <MinimalInput label="Notes / Observations" value={newLog.notes} onChange={(e: any) => setNewLog({...newLog, notes: e.target.value})} />
-                                <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
-                                    <p className="text-xs text-slate-400 font-bold uppercase mb-2">Optional Cost Tracking</p>
-                                    <MinimalInput label="Cost Incurred ($)" type="number" value={newLog.cost} onChange={(e: any) => setNewLog({...newLog, cost: Number(e.target.value)})} />
-                                </div>
-                                <button type="submit" className="w-full py-4 text-white bg-slate-900 rounded-xl hover:bg-slate-800 flex items-center justify-center gap-2 shadow-xl font-bold uppercase tracking-wider transition-all"><Save size={18} /> Save Maintenance Log</button>
-                            </form>
-                        </div>
+            <AccessibleModal
+                isOpen={isLogModalOpen}
+                onClose={() => setIsLogModalOpen(false)}
+                title="Log Maintenance Check"
+                description="Record the outcome of a structural health inspection for a billboard asset."
+                size="lg"
+                variant="default"
+                icon={<Wrench size={20} />}
+                closeOnOverlayClick={false}
+                mobileLayout="sheet"
+                footer={
+                    <>
+                        <ModalButton variant="secondary" onClick={() => setIsLogModalOpen(false)}>Cancel</ModalButton>
+                        <ModalButton variant="primary" type="submit" form="log-maintenance-form">
+                            <Save size={14} /> Save Log
+                        </ModalButton>
+                    </>
+                }
+            >
+                <form id="log-maintenance-form" onSubmit={handleSaveLog} className="space-y-6">
+                    <MinimalSelect label="Select Billboard" value={newLog.billboardId} onChange={(e: any) => setNewLog({...newLog, billboardId: e.target.value})} options={[{value:'', label: 'Select Asset...'}, ...billboards.map(b => ({value: b.id, label: b.name}))]} />
+                    <div className="grid grid-cols-2 gap-6">
+                        <MinimalInput label="Date Checked" type="date" value={newLog.date} onChange={(e: any) => setNewLog({...newLog, date: e.target.value})} />
+                        <MinimalSelect label="Check Type" value={newLog.type} onChange={(e: any) => setNewLog({...newLog, type: e.target.value})} options={[{value:'Visual Check', label:'Visual Check'}, {value:'Structural', label:'Structural Safety'}, {value:'Electrical', label:'Electrical / Light'}, {value:'Cleaning', label:'Cleaning'}, {value:'Repair', label:'Repair'}]} />
                     </div>
-                </div>
-            )}
+                    <div className="grid grid-cols-2 gap-6">
+                        <MinimalInput label="Technician Name" value={newLog.technician} onChange={(e: any) => setNewLog({...newLog, technician: e.target.value})} required />
+                        <MinimalSelect label="Result Status" value={newLog.status} onChange={(e: any) => setNewLog({...newLog, status: e.target.value})} options={[{value:'Pass', label:'Pass (Good)'}, {value:'Needs Attention', label:'Needs Attention'}, {value:'Fail', label:'Fail (Critical)'}]} />
+                    </div>
+                    <MinimalInput label="Notes / Observations" value={newLog.notes} onChange={(e: any) => setNewLog({...newLog, notes: e.target.value})} />
+                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                        <p className="text-xs text-slate-400 font-bold uppercase mb-2">Optional Cost Tracking</p>
+                        <MinimalInput label="Cost Incurred ($)" type="number" value={newLog.cost} onChange={(e: any) => setNewLog({...newLog, cost: Number(e.target.value)})} />
+                    </div>
+                </form>
+            </AccessibleModal>
         </div>
     );
 };

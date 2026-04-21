@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, AlertTriangle, AlertCircle, Info, X, Loader2 } from 'lucide-react';
+import { AccessibleModal, ModalButton } from './ui/AccessibleModal';
 
 type ToastVariant = 'success' | 'error' | 'warning' | 'info';
 
@@ -90,47 +91,30 @@ interface PendingConfirm extends ConfirmOptions {
 
 const ConfirmDialog: React.FC<{ pending: PendingConfirm; onResolve: (v: boolean) => void }> = ({ pending, onResolve }) => {
   const isDanger = pending.variant === 'danger';
-  const cancelRef = useRef<HTMLButtonElement | null>(null);
-  useEffect(() => { cancelRef.current?.focus(); }, []);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onResolve(false);
-      else if (e.key === 'Enter') onResolve(true);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onResolve]);
-
   return (
-    <div className="fixed inset-0 z-[9998] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in">
-      <div className="bg-white rounded-3xl shadow-2xl border border-white/20 max-w-md w-full overflow-hidden">
-        <div className={`p-5 flex items-center gap-3 ${isDanger ? 'bg-red-50' : 'bg-slate-50'} border-b border-slate-100`}>
-          <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isDanger ? 'bg-red-100 text-red-600' : 'bg-slate-200 text-slate-700'}`}>
-            <AlertTriangle size={20} />
-          </div>
-          <h3 className="text-base font-bold text-slate-900 tracking-tight">{pending.title || (isDanger ? 'Confirm Action' : 'Please Confirm')}</h3>
-        </div>
-        <div className="px-6 py-5">
-          <p className="text-sm text-slate-600 whitespace-pre-line leading-relaxed">{pending.message}</p>
-        </div>
-        <div className="flex items-center justify-end gap-2 px-5 py-4 bg-slate-50/70 border-t border-slate-100">
-          <button
-            ref={cancelRef}
-            onClick={() => onResolve(false)}
-            className="px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider text-slate-600 bg-white border border-slate-200 hover:bg-slate-100 transition-colors"
-          >
+    <AccessibleModal
+      isOpen={true}
+      onClose={() => onResolve(false)}
+      role="alertdialog"
+      variant={isDanger ? 'danger' : 'default'}
+      size="sm"
+      title={pending.title || (isDanger ? 'Confirm Action' : 'Please Confirm')}
+      zIndex={9998}
+      closeOnOverlayClick={false}
+      onConfirmKey={() => onResolve(true)}
+      footer={
+        <>
+          <ModalButton variant="secondary" onClick={() => onResolve(false)}>
             {pending.cancelLabel || 'Cancel'}
-          </button>
-          <button
-            onClick={() => onResolve(true)}
-            className={`px-5 py-2 rounded-xl text-xs font-bold uppercase tracking-wider text-white shadow-lg transition-colors ${isDanger ? 'bg-red-600 hover:bg-red-700 shadow-red-500/30' : 'bg-slate-900 hover:bg-slate-800 shadow-slate-900/20'}`}
-          >
+          </ModalButton>
+          <ModalButton variant={isDanger ? 'danger' : 'primary'} onClick={() => onResolve(true)}>
             {pending.confirmLabel || (isDanger ? 'Delete' : 'Confirm')}
-          </button>
-        </div>
-      </div>
-    </div>
+          </ModalButton>
+        </>
+      }
+    >
+      <p className="text-sm text-slate-600 whitespace-pre-line leading-relaxed">{pending.message}</p>
+    </AccessibleModal>
   );
 };
 

@@ -5,7 +5,8 @@ import { useToast } from './Toast';
 import { generateStatementPDF, generatePaymentSchedulePDF, generateReceivedPaymentsPDF } from '../services/pdfGenerator';
 import { emailInvoice, emailStatement } from '../services/emailService';
 import { Client, Invoice } from '../types';
-import { DollarSign, FileText, Download, CheckCircle, AlertCircle, Search, CreditCard, X, Check, Filter, Hash, Wallet, Building, Clock, Calendar, Mail, Loader2 } from 'lucide-react';
+import { DollarSign, FileText, Download, CheckCircle, AlertCircle, Search, CreditCard, Check, Filter, Hash, Wallet, Building, Clock, Calendar, Mail, Loader2 } from 'lucide-react';
+import { AccessibleModal, ModalButton } from './ui/AccessibleModal';
 
 const MinimalInput = ({ label, value, onChange, type = "text", required = false, placeholder = "", icon: Icon }: any) => (
     <div className="group relative pt-6">
@@ -178,7 +179,39 @@ export const Payments: React.FC = () => {
                     </div>
                  )}
             </div>
-             {selectedInvoice && (<div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md flex items-center justify-center z-50 p-4 transition-all animate-fade-in"><div className="bg-white/95 backdrop-blur-xl rounded-3xl shadow-2xl max-w-md w-full border border-white/20 overflow-hidden transform scale-100"><div className="bg-slate-900 p-6 text-white flex justify-between items-start"><div><h3 className="text-xl font-bold tracking-tight">Record Payment</h3><p className="text-slate-400 text-sm mt-1">Invoice #{selectedInvoice.id}</p></div><button onClick={() => setSelectedInvoice(null)} className="text-slate-400 hover:text-white transition-colors"><X size={20}/></button></div><div className="p-8"><div className="bg-slate-50 rounded-2xl p-6 mb-8 text-center border border-slate-100"><p className="text-xs font-bold uppercase text-slate-400 tracking-wider mb-2">Total Amount Due</p><h2 className="text-4xl font-extrabold text-slate-900 tracking-tighter">${selectedInvoice.total.toLocaleString()}</h2><p className="text-sm font-medium text-slate-500 mt-2">{getClientName(selectedInvoice.clientId)}</p></div><div className="space-y-6"><div className="grid grid-cols-2 gap-6"><div className="col-span-2"><MinimalInput label="Payment Date" type="date" value={paymentDetails.date} onChange={(e: any) => setPaymentDetails({...paymentDetails, date: e.target.value})} icon={Calendar} required /></div><div className="col-span-2"><MinimalSelect label="Payment Method" value={paymentDetails.method} onChange={(e: any) => setPaymentDetails({...paymentDetails, method: e.target.value})} icon={Wallet} options={[{value: 'Bank Transfer', label: 'Bank Transfer'},{value: 'Cash', label: 'Cash'},{value: 'EcoCash', label: 'EcoCash Mobile Money'},{value: 'Other', label: 'Other'}]} /></div></div><MinimalInput label="Reference Number / Proof" value={paymentDetails.reference} onChange={(e: any) => setPaymentDetails({...paymentDetails, reference: e.target.value})} icon={Hash} placeholder="e.g. POP-12345" required /></div><button onClick={confirmPayment} className="w-full mt-8 py-4 bg-green-500 hover:bg-green-600 text-white rounded-xl font-bold uppercase tracking-wider shadow-lg shadow-green-500/30 transition-all flex items-center justify-center gap-2"><Check size={20} /> Confirm Payment</button></div></div></div>)}
+            <AccessibleModal
+                isOpen={!!selectedInvoice}
+                onClose={() => setSelectedInvoice(null)}
+                title="Record Payment"
+                description={selectedInvoice ? `Invoice #${selectedInvoice.id}` : undefined}
+                size="md"
+                variant="default"
+                icon={<CreditCard size={20} />}
+                closeOnOverlayClick={false}
+                mobileLayout="sheet"
+                onConfirmKey={confirmPayment}
+                footer={
+                    <>
+                        <ModalButton variant="secondary" onClick={() => setSelectedInvoice(null)}>Cancel</ModalButton>
+                        <ModalButton variant="primary" onClick={confirmPayment}><Check size={14} /> Confirm Payment</ModalButton>
+                    </>
+                }
+            >
+                {selectedInvoice && (
+                    <div className="space-y-6">
+                        <div className="bg-slate-50 rounded-2xl p-6 text-center border border-slate-100">
+                            <p className="text-xs font-bold uppercase text-slate-400 tracking-wider mb-2">Total Amount Due</p>
+                            <h2 className="text-4xl font-extrabold text-slate-900 tracking-tighter">${selectedInvoice.total.toLocaleString()}</h2>
+                            <p className="text-sm font-medium text-slate-500 mt-2">{getClientName(selectedInvoice.clientId)}</p>
+                        </div>
+                        <div className="space-y-6">
+                            <MinimalInput label="Payment Date" type="date" value={paymentDetails.date} onChange={(e: any) => setPaymentDetails({...paymentDetails, date: e.target.value})} icon={Calendar} required />
+                            <MinimalSelect label="Payment Method" value={paymentDetails.method} onChange={(e: any) => setPaymentDetails({...paymentDetails, method: e.target.value})} icon={Wallet} options={[{value: 'Bank Transfer', label: 'Bank Transfer'},{value: 'Cash', label: 'Cash'},{value: 'EcoCash', label: 'EcoCash Mobile Money'},{value: 'Other', label: 'Other'}]} />
+                            <MinimalInput label="Reference Number / Proof" value={paymentDetails.reference} onChange={(e: any) => setPaymentDetails({...paymentDetails, reference: e.target.value})} icon={Hash} placeholder="e.g. POP-12345" required />
+                        </div>
+                    </div>
+                )}
+            </AccessibleModal>
         </>
     );
 };

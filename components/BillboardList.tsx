@@ -3,9 +3,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Billboard, BillboardType, Client, Contract } from '../types';
 import { getBillboards, addBillboard, updateBillboard, deleteBillboard, mockClients, ZIM_TOWNS, getClients, updateClient, bulkAddBillboards, bulkAddClients, bulkAddContracts, bulkUpdateBillboards } from '../services/mockData';
 import { estimateLocationDetails } from '../services/aiService';
-import { MapPin, X, Edit2, Save, Plus, Image as ImageIcon, Map as MapIcon, Grid as GridIcon, Trash2, AlertTriangle, Share2, Eye, EyeOff, Copy, List as ListIcon, Search, Link2, FileUp, FileDown, Sparkles, Loader2, Filter, Check, MoreHorizontal, RefreshCw } from 'lucide-react';
+import { MapPin, X, Edit2, Plus, Image as ImageIcon, Map as MapIcon, Grid as GridIcon, Trash2, Share2, Eye, EyeOff, Copy, List as ListIcon, Search, Link2, FileUp, FileDown, Sparkles, Loader2, Filter, Check, RefreshCw, RectangleHorizontal } from 'lucide-react';
 import L from 'leaflet';
 import { useToast } from './Toast';
+import { AccessibleModal, ModalButton } from './ui/AccessibleModal';
 
 const MinimalInput = ({ label, value, onChange, type = "text", required = false }: any) => (
   <div className="group relative">
@@ -602,236 +603,240 @@ export const BillboardList: React.FC<BillboardListProps> = ({ readOnly = false }
       )}
 
       {/* Batch Edit Modal */}
-      {batchEditType && (
-          <div className="fixed inset-0 z-[200] overflow-y-auto">
-              <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md transition-opacity" onClick={() => setBatchEditType(null)} />
-              <div className="flex min-h-full items-center justify-center p-4 text-center">
-                  <div className="relative transform overflow-hidden rounded-2xl bg-white text-left shadow-2xl transition-all sm:my-8 sm:w-full sm:max-w-sm border border-white/20 p-6">
-                      <h3 className="text-lg font-bold text-slate-900 mb-4">Batch Update {batchEditType}</h3>
-                      <form onSubmit={handleBatchEditTown}>
-                          <MinimalSelect 
-                              label="New Town" 
-                              value={batchEditValue} 
-                              onChange={(e: any) => setBatchEditValue(e.target.value)} 
-                              options={[{value:'', label: 'Select Town...'}, ...ZIM_TOWNS.map(t => ({ value: t, label: t }))]} 
-                          />
-                          <div className="flex gap-3 mt-6">
-                              <button type="button" onClick={() => setBatchEditType(null)} className="flex-1 py-3 text-slate-500 bg-slate-50 hover:bg-slate-100 rounded-xl font-bold uppercase text-xs tracking-wider">Cancel</button>
-                              <button type="submit" className="flex-1 py-3 text-white bg-slate-900 hover:bg-slate-800 rounded-xl font-bold uppercase text-xs tracking-wider shadow-lg">Apply to {selectedIds.length}</button>
-                          </div>
-                      </form>
-                  </div>
-              </div>
+      <AccessibleModal
+        isOpen={!!batchEditType}
+        onClose={() => setBatchEditType(null)}
+        title={`Batch Update ${batchEditType ?? ''}`}
+        size="sm"
+        icon={<MapPin size={20} />}
+        footer={
+          <>
+            <ModalButton variant="secondary" onClick={() => setBatchEditType(null)}>Cancel</ModalButton>
+            <ModalButton variant="primary" type="submit" onClick={() => { const form = document.getElementById('batch-town-form') as HTMLFormElement | null; form?.requestSubmit(); }}>Apply to {selectedIds.length}</ModalButton>
+          </>
+        }
+      >
+        <form id="batch-town-form" onSubmit={handleBatchEditTown}>
+          <MinimalSelect
+            label="New Town"
+            value={batchEditValue}
+            onChange={(e: any) => setBatchEditValue(e.target.value)}
+            options={[{value:'', label: 'Select Town...'}, ...ZIM_TOWNS.map(t => ({ value: t, label: t }))]}
+          />
+        </form>
+      </AccessibleModal>
+
+      {/* Map Share Modal */}
+      <AccessibleModal
+        isOpen={isMapShareModalOpen}
+        onClose={() => setIsMapShareModalOpen(false)}
+        title="Share Map"
+        description="Clients will see a simplified view without pricing details."
+        size="sm"
+        icon={<Share2 size={20} />}
+        footer={
+          <>
+            <ModalButton variant="secondary" onClick={() => setIsMapShareModalOpen(false)}>Close</ModalButton>
+            <ModalButton variant="primary" onClick={() => { setIsClientView(true); setViewMode('map'); setIsMapShareModalOpen(false); }}>Preview</ModalButton>
+          </>
+        }
+      >
+        <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 flex items-center justify-between shadow-inner">
+          <code className="text-xs text-slate-600 truncate max-w-[200px] font-mono">{`${window.location.origin}${window.location.pathname}?view=map`}</code>
+          <button onClick={copyMapLink} className="p-2 hover:bg-white rounded-xl text-slate-500 transition-all hover:text-indigo-600 hover:shadow-sm"><Copy size={18}/></button>
+        </div>
+      </AccessibleModal>
+
+      {/* Add Billboard Modal */}
+      <AccessibleModal
+        isOpen={isAddModalOpen}
+        onClose={() => setIsAddModalOpen(false)}
+        title="Add New Asset"
+        size="xl"
+        mobileLayout="sheet"
+        closeOnOverlayClick={false}
+        icon={<RectangleHorizontal size={20} />}
+        footer={
+          <>
+            <ModalButton variant="secondary" onClick={() => setIsAddModalOpen(false)}>Cancel</ModalButton>
+            <ModalButton variant="primary" type="submit" onClick={() => { const form = document.getElementById('add-billboard-form') as HTMLFormElement | null; form?.requestSubmit(); }}>Create Asset</ModalButton>
+          </>
+        }
+      >
+        <form id="add-billboard-form" onSubmit={handleAddBillboard} className="grid grid-cols-1 md:grid-cols-2 gap-8">
+          <div className="space-y-6">
+            <MinimalInput label="Name" value={newBillboard.name} onChange={(e: any) => setNewBillboard({...newBillboard, name: e.target.value})} required />
+            <div className="grid grid-cols-2 gap-4">
+              <MinimalInput label="Location Description" value={newBillboard.location} onChange={(e: any) => setNewBillboard({...newBillboard, location: e.target.value})} required />
+              <MinimalSelect label="Town / City" value={newBillboard.town} onChange={(e: any) => setNewBillboard({...newBillboard, town: e.target.value})} options={ZIM_TOWNS.map(t => ({ value: t, label: t }))}/>
+            </div>
+            <div className="flex justify-end">
+              <button type="button" onClick={() => handleAiAutofill(false)} disabled={isAutoFilling} className="flex items-center gap-2 text-xs font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg transition-colors">
+                {isAutoFilling ? <Loader2 size={14} className="animate-spin"/> : <Sparkles size={14}/>} AI Auto-Fill & Coordinates
+              </button>
+            </div>
+            <MinimalSelect label="Type" value={newBillboard.type} onChange={(e: any) => setNewBillboard({...newBillboard, type: e.target.value})} options={[{ value: BillboardType.Static, label: 'Static (Side A/B)' }, { value: BillboardType.LED, label: 'LED (Slots)' }]}/>
+            <MinimalTextArea label="Visibility & Traffic Analysis" value={newBillboard.visibility || ''} onChange={(e: any) => setNewBillboard({...newBillboard, visibility: e.target.value})}/>
           </div>
-      )}
-
-      {/* Modals Updated for Responsiveness */}
-      {isMapShareModalOpen && (
-        <div className="fixed inset-0 z-[200] overflow-y-auto">
-            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md transition-opacity" onClick={() => setIsMapShareModalOpen(false)} />
-            <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
-                <div className="relative transform overflow-hidden rounded-3xl bg-white text-left shadow-2xl transition-all sm:my-8 sm:w-full sm:max-w-sm border border-white/20 p-8 transform scale-100">
-                    <div className="w-16 h-16 bg-gradient-to-br from-indigo-50 to-indigo-100 rounded-2xl flex items-center justify-center mx-auto mb-6 text-indigo-600 shadow-inner border border-indigo-200"><Share2 size={32} /></div>
-                    <h3 className="text-2xl font-bold text-slate-900 mb-2 text-center">Share Map</h3>
-                    <p className="text-slate-500 text-center text-sm mb-8 leading-relaxed">Clients will see a simplified view without pricing details.</p>
-                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 flex items-center justify-between mb-8 shadow-inner">
-                        <code className="text-xs text-slate-600 truncate max-w-[200px] font-mono">{`${window.location.origin}${window.location.pathname}?view=map`}</code>
-                        <button onClick={copyMapLink} className="p-2 hover:bg-white rounded-xl text-slate-500 transition-all hover:text-indigo-600 hover:shadow-sm"><Copy size={18}/></button>
-                    </div>
-                    <div className="flex gap-4">
-                        <button onClick={() => setIsMapShareModalOpen(false)} className="flex-1 py-4 text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl font-bold uppercase text-xs tracking-wider transition-all">Close</button>
-                        <button onClick={() => { setIsClientView(true); setViewMode('map'); setIsMapShareModalOpen(false); }} className="flex-1 py-4 text-white bg-slate-900 hover:bg-slate-800 rounded-xl font-bold uppercase text-xs tracking-wider transition-all shadow-lg shadow-slate-900/20">Preview</button>
-                    </div>
-                </div>
+          <div className="space-y-6">
+            <div className="space-y-3">
+              <p className="text-xs font-bold uppercase text-slate-400 tracking-wider">Asset Image</p>
+              <div className="flex items-center gap-4">
+                <div className="w-28 h-28 bg-slate-50 rounded-2xl overflow-hidden border border-slate-200 flex items-center justify-center shadow-inner">{newBillboard.imageUrl ? <img src={newBillboard.imageUrl} className="w-full h-full object-cover"/> : <ImageIcon className="text-slate-300 w-8 h-8" />}</div>
+                <label className="flex-1 cursor-pointer group">
+                  <div className="h-28 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center text-slate-400 group-hover:border-indigo-300 group-hover:text-indigo-500 transition-colors bg-slate-50/50 group-hover:bg-indigo-50/30">
+                    <span className="text-xs font-bold uppercase tracking-wider mb-1">Click to Upload</span>
+                    <span className="text-[10px]">JPG, PNG (Max 5MB)</span>
+                  </div>
+                  <input type="file" className="hidden" accept="image/*" onChange={(e) => handleImageUpload(e, false)} />
+                </label>
+              </div>
             </div>
-        </div>
-      )}
-
-      {isAddModalOpen && (
-        <div className="fixed inset-0 z-[200] overflow-y-auto">
-            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md transition-opacity" onClick={() => setIsAddModalOpen(false)} />
-            <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
-                <div className="relative transform overflow-hidden rounded-[2rem] bg-white text-left shadow-2xl transition-all sm:my-8 sm:w-full sm:max-w-3xl border border-white/20">
-                    <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-white sticky top-0 z-10">
-                        <h3 className="text-2xl font-bold text-slate-900 tracking-tight">Add New Asset</h3>
-                        <button onClick={() => setIsAddModalOpen(false)} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><X size={24} className="text-slate-400" /></button>
-                    </div>
-                    <form onSubmit={handleAddBillboard} className="p-8 grid grid-cols-1 md:grid-cols-2 gap-8">
-                        <div className="space-y-6">
-                            <MinimalInput label="Name" value={newBillboard.name} onChange={(e: any) => setNewBillboard({...newBillboard, name: e.target.value})} required />
-                            <div className="grid grid-cols-2 gap-4">
-                                <MinimalInput label="Location Description" value={newBillboard.location} onChange={(e: any) => setNewBillboard({...newBillboard, location: e.target.value})} required />
-                                <MinimalSelect label="Town / City" value={newBillboard.town} onChange={(e: any) => setNewBillboard({...newBillboard, town: e.target.value})} options={ZIM_TOWNS.map(t => ({ value: t, label: t }))}/>
-                            </div>
-                            <div className="flex justify-end">
-                                <button type="button" onClick={() => handleAiAutofill(false)} disabled={isAutoFilling} className="flex items-center gap-2 text-xs font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg transition-colors">
-                                    {isAutoFilling ? <Loader2 size={14} className="animate-spin"/> : <Sparkles size={14}/>} AI Auto-Fill & Coordinates
-                                </button>
-                            </div>
-                            <MinimalSelect label="Type" value={newBillboard.type} onChange={(e: any) => setNewBillboard({...newBillboard, type: e.target.value})} options={[{ value: BillboardType.Static, label: 'Static (Side A/B)' }, { value: BillboardType.LED, label: 'LED (Slots)' }]}/> 
-                            <MinimalTextArea label="Visibility & Traffic Analysis" value={newBillboard.visibility || ''} onChange={(e: any) => setNewBillboard({...newBillboard, visibility: e.target.value})}/>
-                        </div>
-                        <div className="space-y-6">
-                            <div className="space-y-3">
-                                <p className="text-xs font-bold uppercase text-slate-400 tracking-wider">Asset Image</p>
-                                <div className="flex items-center gap-4">
-                                    <div className="w-28 h-28 bg-slate-50 rounded-2xl overflow-hidden border border-slate-200 flex items-center justify-center shadow-inner">{newBillboard.imageUrl ? <img src={newBillboard.imageUrl} className="w-full h-full object-cover"/> : <ImageIcon className="text-slate-300 w-8 h-8" />}</div>
-                                    <label className="flex-1 cursor-pointer group">
-                                        <div className="h-28 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center text-slate-400 group-hover:border-indigo-300 group-hover:text-indigo-500 transition-colors bg-slate-50/50 group-hover:bg-indigo-50/30">
-                                            <span className="text-xs font-bold uppercase tracking-wider mb-1">Click to Upload</span>
-                                            <span className="text-[10px]">JPG, PNG (Max 5MB)</span>
-                                        </div>
-                                        <input type="file" className="hidden" accept="image/*" onChange={(e) => handleImageUpload(e, false)} />
-                                    </label>
-                                </div>
-                            </div>
-                            <div className="grid grid-cols-2 gap-4"><MinimalInput label="Width (m)" type="number" value={newBillboard.width} onChange={(e: any) => setNewBillboard({...newBillboard, width: Number(e.target.value)})} /><MinimalInput label="Height (m)" type="number" value={newBillboard.height} onChange={(e: any) => setNewBillboard({...newBillboard, height: Number(e.target.value)})} /></div>
-                            <div className="grid grid-cols-2 gap-4"><MinimalInput label="Latitude" type="number" value={newBillboard.coordinates?.lat} onChange={(e: any) => setNewBillboard({...newBillboard, coordinates: {...newBillboard.coordinates!, lat: Number(e.target.value)}})} /><MinimalInput label="Longitude" type="number" value={newBillboard.coordinates?.lng} onChange={(e: any) => setNewBillboard({...newBillboard, coordinates: {...newBillboard.coordinates!, lng: Number(e.target.value)}})} /></div>
-                            {newBillboard.type === BillboardType.Static ? (
-                              <div className="space-y-4 pt-2">
-                                <p className="text-xs font-bold uppercase text-slate-400 tracking-wider">Monthly Rates</p>
-                                <div className="grid grid-cols-2 gap-4">
-                                  <MinimalInput label="Side A Rate ($)" type="number" value={newBillboard.sideARate} onChange={(e: any) => setNewBillboard({...newBillboard, sideARate: Number(e.target.value)})} />
-                                  <MinimalInput label="Side B Rate ($)" type="number" value={newBillboard.sideBRate} onChange={(e: any) => setNewBillboard({...newBillboard, sideBRate: Number(e.target.value)})} />
-                                </div>
-                                <div className="grid grid-cols-2 gap-4">
-                                   <MinimalSelect label="Side A Status" value={newBillboard.sideAStatus} onChange={(e: any) => setNewBillboard({...newBillboard, sideAStatus: e.target.value})} options={[{value: 'Available', label: 'Available'}, {value: 'Rented', label: 'Rented'}]}/>
-                                   <MinimalSelect label="Side B Status" value={newBillboard.sideBStatus} onChange={(e: any) => setNewBillboard({...newBillboard, sideBStatus: e.target.value})} options={[{value: 'Available', label: 'Available'}, {value: 'Rented', label: 'Rented'}]}/>
-                                </div>
-                              </div>
-                            ) : (
-                              <div className="space-y-4 pt-2">
-                                <p className="text-xs font-bold uppercase text-slate-400 tracking-wider">LED Configuration</p>
-                                <div className="grid grid-cols-2 gap-4">
-                                  <MinimalInput label="Total Slots" type="number" value={newBillboard.totalSlots} onChange={(e: any) => setNewBillboard({...newBillboard, totalSlots: Number(e.target.value)})} />
-                                  <MinimalInput label="Rate / Slot ($)" type="number" value={newBillboard.ratePerSlot} onChange={(e: any) => setNewBillboard({...newBillboard, ratePerSlot: Number(e.target.value)})} />
-                                </div>
-                                <MinimalInput label="Initially Rented Slots" type="number" value={newBillboard.rentedSlots} onChange={(e: any) => setNewBillboard({...newBillboard, rentedSlots: Number(e.target.value)})} />
-                              </div>
-                            )}
-                        </div>
-                        <div className="md:col-span-2 pt-6 flex gap-4 border-t border-slate-100">
-                            <button type="button" onClick={() => setIsAddModalOpen(false)} className="flex-1 py-4 text-slate-500 hover:bg-slate-50 rounded-xl font-bold uppercase text-xs tracking-wider transition-colors">Cancel</button>
-                            <button type="submit" className="flex-1 py-4 text-white bg-slate-900 rounded-xl hover:bg-slate-800 shadow-lg font-bold uppercase tracking-wider transition-all hover:scale-[1.02]">Create Asset</button>
-                        </div>
-                    </form>
+            <div className="grid grid-cols-2 gap-4"><MinimalInput label="Width (m)" type="number" value={newBillboard.width} onChange={(e: any) => setNewBillboard({...newBillboard, width: Number(e.target.value)})} /><MinimalInput label="Height (m)" type="number" value={newBillboard.height} onChange={(e: any) => setNewBillboard({...newBillboard, height: Number(e.target.value)})} /></div>
+            <div className="grid grid-cols-2 gap-4"><MinimalInput label="Latitude" type="number" value={newBillboard.coordinates?.lat} onChange={(e: any) => setNewBillboard({...newBillboard, coordinates: {...newBillboard.coordinates!, lat: Number(e.target.value)}})} /><MinimalInput label="Longitude" type="number" value={newBillboard.coordinates?.lng} onChange={(e: any) => setNewBillboard({...newBillboard, coordinates: {...newBillboard.coordinates!, lng: Number(e.target.value)}})} /></div>
+            {newBillboard.type === BillboardType.Static ? (
+              <div className="space-y-4 pt-2">
+                <p className="text-xs font-bold uppercase text-slate-400 tracking-wider">Monthly Rates</p>
+                <div className="grid grid-cols-2 gap-4">
+                  <MinimalInput label="Side A Rate ($)" type="number" value={newBillboard.sideARate} onChange={(e: any) => setNewBillboard({...newBillboard, sideARate: Number(e.target.value)})} />
+                  <MinimalInput label="Side B Rate ($)" type="number" value={newBillboard.sideBRate} onChange={(e: any) => setNewBillboard({...newBillboard, sideBRate: Number(e.target.value)})} />
                 </div>
-            </div>
-        </div>
-      )}
-
-      {editingBillboard && (
-        <div className="fixed inset-0 z-[200] overflow-y-auto">
-            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md transition-opacity" onClick={() => setEditingBillboard(null)} />
-            <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
-                <div className="relative transform overflow-hidden rounded-[2rem] bg-white text-left shadow-2xl transition-all sm:my-8 sm:w-full sm:max-w-3xl border border-white/20">
-                    <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-white sticky top-0 z-10">
-                        <h3 className="text-2xl font-bold text-slate-900 tracking-tight">Edit Asset</h3>
-                        <button onClick={() => setEditingBillboard(null)} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><X size={24} className="text-slate-400" /></button>
-                    </div>
-                    <form onSubmit={handleSaveEdit} className="p-8 grid grid-cols-1 md:grid-cols-2 gap-8">
-                        <div className="space-y-6">
-                            <MinimalInput label="Name" value={editingBillboard.name} onChange={(e: any) => setEditingBillboard({...editingBillboard, name: e.target.value})} required />
-                            <div className="grid grid-cols-2 gap-4">
-                                <MinimalInput label="Location Description" value={editingBillboard.location} onChange={(e: any) => setEditingBillboard({...editingBillboard, location: e.target.value})} required />
-                                <MinimalSelect label="Town / City" value={editingBillboard.town} onChange={(e: any) => setEditingBillboard({...editingBillboard, town: e.target.value})} options={ZIM_TOWNS.map(t => ({ value: t, label: t }))}/>
-                            </div>
-                            <div className="flex justify-end">
-                                <button type="button" onClick={() => handleAiAutofill(true)} disabled={isAutoFilling} className="flex items-center gap-2 text-xs font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg transition-colors">
-                                    {isAutoFilling ? <Loader2 size={14} className="animate-spin"/> : <Sparkles size={14}/>} AI Auto-Fill & Coordinates
-                                </button>
-                            </div>
-                            <MinimalSelect 
-                                label="Type" 
-                                value={editingBillboard.type} 
-                                onChange={(e: any) => {
-                                    const newType = e.target.value;
-                                    setEditingBillboard({
-                                        ...editingBillboard,
-                                        type: newType,
-                                        // Reset rates if switching type to avoid confusion or mixed data
-                                        ...(newType === BillboardType.LED ? { 
-                                            sideARate: 0, 
-                                            sideBRate: 0,
-                                            totalSlots: editingBillboard.totalSlots || 10,
-                                            ratePerSlot: editingBillboard.ratePerSlot || 0
-                                        } : {
-                                            ratePerSlot: 0,
-                                            totalSlots: 0,
-                                            sideARate: editingBillboard.sideARate || 0,
-                                            sideBRate: editingBillboard.sideBRate || 0
-                                        })
-                                    });
-                                }}
-                                options={[{ value: BillboardType.Static, label: 'Static (Side A/B)' }, { value: BillboardType.LED, label: 'LED (Slots)' }]}
-                            /> 
-                            <MinimalTextArea label="Visibility & Traffic Analysis" value={editingBillboard.visibility || ''} onChange={(e: any) => setEditingBillboard({...editingBillboard, visibility: e.target.value})}/>
-                        </div>
-                        <div className="space-y-6">
-                            <div className="space-y-3">
-                                <p className="text-xs font-bold uppercase text-slate-400 tracking-wider">Asset Image</p>
-                                <div className="flex items-center gap-4">
-                                    <div className="w-28 h-28 bg-slate-50 rounded-2xl overflow-hidden border border-slate-200 flex items-center justify-center shadow-inner">{editingBillboard.imageUrl ? <img src={editingBillboard.imageUrl} className="w-full h-full object-cover"/> : <ImageIcon className="text-slate-300 w-8 h-8" />}</div>
-                                    <label className="flex-1 cursor-pointer group">
-                                        <div className="h-28 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center text-slate-400 group-hover:border-indigo-300 group-hover:text-indigo-500 transition-colors bg-slate-50/50 group-hover:bg-indigo-50/30">
-                                            <span className="text-xs font-bold uppercase tracking-wider mb-1">Click to Upload</span>
-                                            <span className="text-[10px]">JPG, PNG (Max 5MB)</span>
-                                        </div>
-                                        <input type="file" className="hidden" accept="image/*" onChange={(e) => handleImageUpload(e, true)} />
-                                    </label>
-                                </div>
-                            </div>
-                            <div className="grid grid-cols-2 gap-4"><MinimalInput label="Width (m)" type="number" value={editingBillboard.width} onChange={(e: any) => setEditingBillboard({...editingBillboard, width: Number(e.target.value)})} /><MinimalInput label="Height (m)" type="number" value={editingBillboard.height} onChange={(e: any) => setEditingBillboard({...editingBillboard, height: Number(e.target.value)})} /></div>
-                            <div className="grid grid-cols-2 gap-4"><MinimalInput label="Latitude" type="number" value={editingBillboard.coordinates?.lat} onChange={(e: any) => setEditingBillboard({...editingBillboard, coordinates: {...editingBillboard.coordinates!, lat: Number(e.target.value)}})} /><MinimalInput label="Longitude" type="number" value={editingBillboard.coordinates?.lng} onChange={(e: any) => setEditingBillboard({...editingBillboard, coordinates: {...editingBillboard.coordinates!, lng: Number(e.target.value)}})} /></div>
-                            {editingBillboard.type === BillboardType.Static ? (
-                              <div className="space-y-4 pt-2">
-                                <p className="text-xs font-bold uppercase text-slate-400 tracking-wider">Monthly Rates</p>
-                                <div className="grid grid-cols-2 gap-4">
-                                  <MinimalInput label="Side A Rate ($)" type="number" value={editingBillboard.sideARate} onChange={(e: any) => setEditingBillboard({...editingBillboard, sideARate: Number(e.target.value)})} />
-                                  <MinimalInput label="Side B Rate ($)" type="number" value={editingBillboard.sideBRate} onChange={(e: any) => setEditingBillboard({...editingBillboard, sideBRate: Number(e.target.value)})} />
-                                </div>
-                                <div className="grid grid-cols-2 gap-4">
-                                   <MinimalSelect label="Side A Status" value={editingBillboard.sideAStatus} onChange={(e: any) => setEditingBillboard({...editingBillboard, sideAStatus: e.target.value})} options={[{value: 'Available', label: 'Available'}, {value: 'Rented', label: 'Rented'}]}/>
-                                   <MinimalSelect label="Side B Status" value={editingBillboard.sideBStatus} onChange={(e: any) => setEditingBillboard({...editingBillboard, sideBStatus: e.target.value})} options={[{value: 'Available', label: 'Available'}, {value: 'Rented', label: 'Rented'}]}/>
-                                </div>
-                              </div>
-                            ) : (
-                              <div className="space-y-4 pt-2">
-                                <p className="text-xs font-bold uppercase text-slate-400 tracking-wider">LED Configuration</p>
-                                <div className="grid grid-cols-2 gap-4">
-                                  <MinimalInput label="Total Slots" type="number" value={editingBillboard.totalSlots} onChange={(e: any) => setEditingBillboard({...editingBillboard, totalSlots: Number(e.target.value)})} />
-                                  <MinimalInput label="Rate / Slot ($)" type="number" value={editingBillboard.ratePerSlot} onChange={(e: any) => setEditingBillboard({...editingBillboard, ratePerSlot: Number(e.target.value)})} />
-                                </div>
-                                <MinimalInput label="Rented Slots" type="number" value={editingBillboard.rentedSlots} onChange={(e: any) => setEditingBillboard({...editingBillboard, rentedSlots: Number(e.target.value)})} />
-                              </div>
-                            )}
-                        </div>
-                        <div className="md:col-span-2 pt-6 flex gap-4 border-t border-slate-100">
-                            <button type="button" onClick={() => setEditingBillboard(null)} className="flex-1 py-4 text-slate-500 hover:bg-slate-50 rounded-xl font-bold uppercase text-xs tracking-wider transition-colors">Cancel</button>
-                            <button type="submit" className="flex-1 py-4 text-white bg-slate-900 rounded-xl hover:bg-slate-800 shadow-lg font-bold uppercase tracking-wider transition-all hover:scale-[1.02]">Save Changes</button>
-                        </div>
-                    </form>
+                <div className="grid grid-cols-2 gap-4">
+                  <MinimalSelect label="Side A Status" value={newBillboard.sideAStatus} onChange={(e: any) => setNewBillboard({...newBillboard, sideAStatus: e.target.value})} options={[{value: 'Available', label: 'Available'}, {value: 'Rented', label: 'Rented'}]}/>
+                  <MinimalSelect label="Side B Status" value={newBillboard.sideBStatus} onChange={(e: any) => setNewBillboard({...newBillboard, sideBStatus: e.target.value})} options={[{value: 'Available', label: 'Available'}, {value: 'Rented', label: 'Rented'}]}/>
                 </div>
-            </div>
-        </div>
-      )}
-
-      {billboardToDelete && (
-        <div className="fixed inset-0 z-[200] overflow-y-auto">
-            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md transition-opacity" onClick={() => setBillboardToDelete(null)} />
-            <div className="flex min-h-full items-center justify-center p-4 text-center">
-                <div className="relative transform overflow-hidden rounded-2xl bg-white text-left shadow-2xl transition-all sm:my-8 sm:w-full sm:max-w-sm border border-white/20 p-6 text-center">
-                    <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 border-4 border-red-50"><AlertTriangle className="text-red-500" size={32}/></div>
-                    <h3 className="text-xl font-bold text-slate-900 mb-2">Delete Asset?</h3>
-                    <p className="text-slate-500 mb-6 text-sm">Are you sure you want to delete <span className="font-bold text-slate-700">{billboardToDelete.name}</span>? This action cannot be undone.</p>
-                    <div className="flex gap-3">
-                        <button onClick={() => setBillboardToDelete(null)} className="flex-1 py-3 text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl font-bold uppercase text-xs tracking-wider transition-colors">Cancel</button>
-                        <button onClick={handleConfirmDelete} className="flex-1 py-3 text-white bg-red-500 hover:bg-red-600 rounded-xl font-bold uppercase text-xs tracking-wider transition-colors shadow-lg shadow-red-500/30">Delete</button>
-                    </div>
+              </div>
+            ) : (
+              <div className="space-y-4 pt-2">
+                <p className="text-xs font-bold uppercase text-slate-400 tracking-wider">LED Configuration</p>
+                <div className="grid grid-cols-2 gap-4">
+                  <MinimalInput label="Total Slots" type="number" value={newBillboard.totalSlots} onChange={(e: any) => setNewBillboard({...newBillboard, totalSlots: Number(e.target.value)})} />
+                  <MinimalInput label="Rate / Slot ($)" type="number" value={newBillboard.ratePerSlot} onChange={(e: any) => setNewBillboard({...newBillboard, ratePerSlot: Number(e.target.value)})} />
                 </div>
+                <MinimalInput label="Initially Rented Slots" type="number" value={newBillboard.rentedSlots} onChange={(e: any) => setNewBillboard({...newBillboard, rentedSlots: Number(e.target.value)})} />
+              </div>
+            )}
+          </div>
+        </form>
+      </AccessibleModal>
+
+      {/* Edit Billboard Modal */}
+      <AccessibleModal
+        isOpen={!!editingBillboard}
+        onClose={() => setEditingBillboard(null)}
+        title={editingBillboard ? `Edit ${editingBillboard.name}` : 'Edit Asset'}
+        size="xl"
+        mobileLayout="sheet"
+        closeOnOverlayClick={false}
+        icon={<RectangleHorizontal size={20} />}
+        footer={
+          <>
+            <ModalButton variant="secondary" onClick={() => setEditingBillboard(null)}>Cancel</ModalButton>
+            <ModalButton variant="primary" type="submit" onClick={() => { const form = document.getElementById('edit-billboard-form') as HTMLFormElement | null; form?.requestSubmit(); }}>Save Changes</ModalButton>
+          </>
+        }
+      >
+        {editingBillboard && (
+          <form id="edit-billboard-form" onSubmit={handleSaveEdit} className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div className="space-y-6">
+              <MinimalInput label="Name" value={editingBillboard.name} onChange={(e: any) => setEditingBillboard({...editingBillboard, name: e.target.value})} required />
+              <div className="grid grid-cols-2 gap-4">
+                <MinimalInput label="Location Description" value={editingBillboard.location} onChange={(e: any) => setEditingBillboard({...editingBillboard, location: e.target.value})} required />
+                <MinimalSelect label="Town / City" value={editingBillboard.town} onChange={(e: any) => setEditingBillboard({...editingBillboard, town: e.target.value})} options={ZIM_TOWNS.map(t => ({ value: t, label: t }))}/>
+              </div>
+              <div className="flex justify-end">
+                <button type="button" onClick={() => handleAiAutofill(true)} disabled={isAutoFilling} className="flex items-center gap-2 text-xs font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg transition-colors">
+                  {isAutoFilling ? <Loader2 size={14} className="animate-spin"/> : <Sparkles size={14}/>} AI Auto-Fill & Coordinates
+                </button>
+              </div>
+              <MinimalSelect
+                label="Type"
+                value={editingBillboard.type}
+                onChange={(e: any) => {
+                  const newType = e.target.value;
+                  setEditingBillboard({
+                    ...editingBillboard,
+                    type: newType,
+                    // Reset rates if switching type to avoid confusion or mixed data
+                    ...(newType === BillboardType.LED ? {
+                      sideARate: 0,
+                      sideBRate: 0,
+                      totalSlots: editingBillboard.totalSlots || 10,
+                      ratePerSlot: editingBillboard.ratePerSlot || 0
+                    } : {
+                      ratePerSlot: 0,
+                      totalSlots: 0,
+                      sideARate: editingBillboard.sideARate || 0,
+                      sideBRate: editingBillboard.sideBRate || 0
+                    })
+                  });
+                }}
+                options={[{ value: BillboardType.Static, label: 'Static (Side A/B)' }, { value: BillboardType.LED, label: 'LED (Slots)' }]}
+              />
+              <MinimalTextArea label="Visibility & Traffic Analysis" value={editingBillboard.visibility || ''} onChange={(e: any) => setEditingBillboard({...editingBillboard, visibility: e.target.value})}/>
             </div>
-        </div>
-      )}
+            <div className="space-y-6">
+              <div className="space-y-3">
+                <p className="text-xs font-bold uppercase text-slate-400 tracking-wider">Asset Image</p>
+                <div className="flex items-center gap-4">
+                  <div className="w-28 h-28 bg-slate-50 rounded-2xl overflow-hidden border border-slate-200 flex items-center justify-center shadow-inner">{editingBillboard.imageUrl ? <img src={editingBillboard.imageUrl} className="w-full h-full object-cover"/> : <ImageIcon className="text-slate-300 w-8 h-8" />}</div>
+                  <label className="flex-1 cursor-pointer group">
+                    <div className="h-28 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center text-slate-400 group-hover:border-indigo-300 group-hover:text-indigo-500 transition-colors bg-slate-50/50 group-hover:bg-indigo-50/30">
+                      <span className="text-xs font-bold uppercase tracking-wider mb-1">Click to Upload</span>
+                      <span className="text-[10px]">JPG, PNG (Max 5MB)</span>
+                    </div>
+                    <input type="file" className="hidden" accept="image/*" onChange={(e) => handleImageUpload(e, true)} />
+                  </label>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4"><MinimalInput label="Width (m)" type="number" value={editingBillboard.width} onChange={(e: any) => setEditingBillboard({...editingBillboard, width: Number(e.target.value)})} /><MinimalInput label="Height (m)" type="number" value={editingBillboard.height} onChange={(e: any) => setEditingBillboard({...editingBillboard, height: Number(e.target.value)})} /></div>
+              <div className="grid grid-cols-2 gap-4"><MinimalInput label="Latitude" type="number" value={editingBillboard.coordinates?.lat} onChange={(e: any) => setEditingBillboard({...editingBillboard, coordinates: {...editingBillboard.coordinates!, lat: Number(e.target.value)}})} /><MinimalInput label="Longitude" type="number" value={editingBillboard.coordinates?.lng} onChange={(e: any) => setEditingBillboard({...editingBillboard, coordinates: {...editingBillboard.coordinates!, lng: Number(e.target.value)}})} /></div>
+              {editingBillboard.type === BillboardType.Static ? (
+                <div className="space-y-4 pt-2">
+                  <p className="text-xs font-bold uppercase text-slate-400 tracking-wider">Monthly Rates</p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <MinimalInput label="Side A Rate ($)" type="number" value={editingBillboard.sideARate} onChange={(e: any) => setEditingBillboard({...editingBillboard, sideARate: Number(e.target.value)})} />
+                    <MinimalInput label="Side B Rate ($)" type="number" value={editingBillboard.sideBRate} onChange={(e: any) => setEditingBillboard({...editingBillboard, sideBRate: Number(e.target.value)})} />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <MinimalSelect label="Side A Status" value={editingBillboard.sideAStatus} onChange={(e: any) => setEditingBillboard({...editingBillboard, sideAStatus: e.target.value})} options={[{value: 'Available', label: 'Available'}, {value: 'Rented', label: 'Rented'}]}/>
+                    <MinimalSelect label="Side B Status" value={editingBillboard.sideBStatus} onChange={(e: any) => setEditingBillboard({...editingBillboard, sideBStatus: e.target.value})} options={[{value: 'Available', label: 'Available'}, {value: 'Rented', label: 'Rented'}]}/>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4 pt-2">
+                  <p className="text-xs font-bold uppercase text-slate-400 tracking-wider">LED Configuration</p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <MinimalInput label="Total Slots" type="number" value={editingBillboard.totalSlots} onChange={(e: any) => setEditingBillboard({...editingBillboard, totalSlots: Number(e.target.value)})} />
+                    <MinimalInput label="Rate / Slot ($)" type="number" value={editingBillboard.ratePerSlot} onChange={(e: any) => setEditingBillboard({...editingBillboard, ratePerSlot: Number(e.target.value)})} />
+                  </div>
+                  <MinimalInput label="Rented Slots" type="number" value={editingBillboard.rentedSlots} onChange={(e: any) => setEditingBillboard({...editingBillboard, rentedSlots: Number(e.target.value)})} />
+                </div>
+              )}
+            </div>
+          </form>
+        )}
+      </AccessibleModal>
+
+      {/* Delete Confirmation Modal */}
+      <AccessibleModal
+        isOpen={!!billboardToDelete}
+        onClose={() => setBillboardToDelete(null)}
+        title="Delete Billboard"
+        description={billboardToDelete ? <>Are you sure you want to delete <span className="font-bold text-slate-700">{billboardToDelete.name}</span>? This action cannot be undone.</> : undefined}
+        size="sm"
+        role="alertdialog"
+        variant="danger"
+        onConfirmKey={handleConfirmDelete}
+        footer={
+          <>
+            <ModalButton variant="secondary" onClick={() => setBillboardToDelete(null)}>Cancel</ModalButton>
+            <ModalButton variant="danger" onClick={handleConfirmDelete}>Delete</ModalButton>
+          </>
+        }
+      >
+        <></>
+      </AccessibleModal>
     </>
   );
 };
