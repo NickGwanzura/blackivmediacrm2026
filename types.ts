@@ -4,6 +4,14 @@ export enum BillboardType {
   LED = 'LED'
 }
 
+// Currency of billed amounts. Money is never aggregated across currencies —
+// dashboards/reports split totals so ZWG and USD stay distinct. 'USD' is the
+// default for historical rows that predate the dual-currency rollout.
+export type Currency = 'USD' | 'ZWG';
+
+export const CURRENCIES: readonly Currency[] = ['USD', 'ZWG'] as const;
+export const DEFAULT_CURRENCY: Currency = 'USD';
+
 export interface Billboard {
   id: string;
   name: string;
@@ -17,9 +25,13 @@ export interface Billboard {
     lat: number;
     lng: number;
   };
-  
+
   // Marketing Info
   visibility?: string; // Traffic analysis, demographics, etc.
+
+  // Billing currency for this billboard's rates (both sides / all LED slots
+  // share one currency). Undefined is treated as USD for backwards compat.
+  currency?: Currency;
 
   // For Static with independent pricing
   sideARate?: number;
@@ -28,11 +40,17 @@ export interface Billboard {
   sideBStatus?: 'Available' | 'Rented';
   sideAClientId?: string;
   sideBClientId?: string;
-  
+
   // For LED
   ratePerSlot?: number;
   totalSlots?: number;
   rentedSlots?: number;
+
+  // Derived during syncBillboardAvailability — not persisted server-side.
+  // True when two or more active contracts claim the same side/slot, or
+  // LED claims exceed totalSlots. overbookingDetail lists each collision.
+  overbooked?: boolean;
+  overbookingDetail?: string;
 }
 
 export interface OutsourcedBillboard {
@@ -42,6 +60,7 @@ export interface OutsourcedBillboard {
   mediaOwner: string; // The 3rd party
   ownerContact: string;
   monthlyPayout: number; // Revenue from them
+  currency?: Currency; // Denomination of monthlyPayout
   contractStart: string;
   contractEnd: string;
   status: 'Active' | 'Inactive';
@@ -63,15 +82,18 @@ export interface Contract {
   billboardId: string;
   startDate: string;
   endDate: string;
-  
+
   // Financials
+  // Contract currency is copied from the billboard at creation so the
+  // contract stays interpretable even if the billboard is repriced.
+  currency?: Currency;
   monthlyRate: number;
   installationCost: number; // One-time fee
   printingCost: number; // Tied to a printing job
   hasVat: boolean;
   totalContractValue: number; // (Monthly * Months) + Install + Print + VAT
   
-  status: 'Active' | 'Pending' | 'Expired';
+  status: 'Active' | 'Pending' | 'Expired' | 'Archived';
   details: string; // e.g., "Side A" or "Slot 5"
   
   // Specific Tracking
@@ -85,6 +107,10 @@ export interface Invoice {
   contractIds?: string[]; // Multiple contract links (Batch/Consolidated)
   clientId: string;
   date: string;
+  // Currency is copied from the originating contract (or chosen ad-hoc for
+  // receipts/quotations). Receipts ALWAYS carry the invoice's currency so
+  // payment ledgers don't mix denominations.
+  currency?: Currency;
   items: { description: string; amount: number }[];
   subtotal: number;
   vatAmount: number; // 0 if hasVat is false
@@ -104,14 +130,16 @@ export interface PrintingJob {
   date: string;
   description: string;
   dimensions: string; // e.g. "12x3m"
-  
+  // All cost/charge fields below are denominated in this currency.
+  currency?: Currency;
+
   // Cost Breakdown
   pvcCost: number;
   inkCost: number;
   electricityCost: number;
   operatorCost: number;
   weldingCost: number;
-  
+
   totalCost: number;
   chargedAmount: number; // What we charged the client (Profit margin)
 }
@@ -121,6 +149,7 @@ export interface Expense {
   category: 'Maintenance' | 'Printing' | 'Electricity' | 'Labor' | 'Other';
   description: string;
   amount: number;
+  currency?: Currency;
   date: string;
   reference?: string;
 }
@@ -135,6 +164,7 @@ export interface MaintenanceLog {
   status: 'Pass' | 'Fail' | 'Needs Attention';
   nextDueDate: string; // Calculated field (usually date + 3 months)
   cost?: number;
+  currency?: Currency; // Denomination of cost
 }
 
 export interface User {
@@ -168,6 +198,9 @@ export interface CompanyProfile {
     address: string;
     city: string;
     country: string;
+    // Default currency for newly-created billboards/expenses/ad-hoc invoices.
+    // Existing rows keep their own currency field — this is only a form default.
+    defaultCurrency?: Currency;
 }
 
 export const VAT_RATE = 0.15;

@@ -664,7 +664,8 @@ const DEFAULT_PROFILE: CompanyProfile = {
     website: "www.blackivymedia.co.zw",
     address: "123 Samora Machel Ave",
     city: "Harare",
-    country: "Zimbabwe"
+    country: "Zimbabwe",
+    defaultCurrency: 'USD',
 };
 let companyProfile: CompanyProfile = loadFromStorage(STORAGE_KEYS.PROFILE, null) || DEFAULT_PROFILE;
 if (!loadFromStorage(STORAGE_KEYS.PROFILE, null)) {
@@ -704,24 +705,65 @@ export const syncBillboardAvailability = () => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
+    // Pass 1 — auto-expire stale Active contracts whose end date has passed.
+    // After this pass, `status === 'Active'` is sufficient on its own; no
+    // downstream caller needs to re-check endDate.
+    let contractsChanged = false;
+    const expiredIds: string[] = [];
+    contracts = contracts.map(c => {
+        if (c.status !== 'Active') return c;
+        const end = new Date(c.endDate);
+        if (isNaN(end.getTime())) return c;
+        if (end < today) {
+            contractsChanged = true;
+            expiredIds.push(c.id);
+            return { ...c, status: 'Expired' as const };
+        }
+        return c;
+    });
+    if (contractsChanged) {
+        saveToStorage(STORAGE_KEYS.CONTRACTS, contracts);
+        logAction('Contract Expiry', `Auto-expired ${expiredIds.length} contract(s): ${expiredIds.join(', ')}`);
+    }
+
+    // Pass 2 — rebuild occupancy from contracts that are in their active
+    // window today (startDate ≤ today ≤ endDate). Future-dated contracts
+    // do not hold inventory yet.
     const resetBillboards = billboards.map(b => ({
         ...b,
         sideAStatus: 'Available' as 'Available' | 'Rented',
         sideBStatus: 'Available' as 'Available' | 'Rented',
         sideAClientId: undefined as string | undefined,
         sideBClientId: undefined as string | undefined,
-        rentedSlots: 0
+        rentedSlots: 0,
+        overbooked: false,
+        overbookingDetail: undefined as string | undefined,
     }));
+
+    // Track collisions: multiple active contracts claiming the same side or slot.
+    type BoardTally = {
+        staticA: number;
+        staticB: number;
+        ledSlots: Map<number, number>;
+        ledUnnumbered: number;
+    };
+    const tallies = new Map<string, BoardTally>();
+    const tallyFor = (id: string): BoardTally => {
+        let t = tallies.get(id);
+        if (!t) { t = { staticA: 0, staticB: 0, ledSlots: new Map(), ledUnnumbered: 0 }; tallies.set(id, t); }
+        return t;
+    };
 
     contracts.forEach(contract => {
         if (contract.status !== 'Active') return;
-        const endDate = new Date(contract.endDate);
-        if (endDate < today) return;
+        const start = new Date(contract.startDate);
+        const end = new Date(contract.endDate);
+        if (isNaN(start.getTime()) || isNaN(end.getTime())) return;
+        if (start > today || end < today) return;
 
-        const boardIndex = resetBillboards.findIndex(b => b.id === contract.billboardId);
-        if (boardIndex === -1) return;
-
-        const board = resetBillboards[boardIndex];
+        const board = resetBillboards.find(b => b.id === contract.billboardId);
+        if (!board) return;
+        const t = tallyFor(board.id);
 
         if (board.type === BillboardType.Static) {
             // contract.side is the authoritative field. Only fall back to the
@@ -729,26 +771,57 @@ export const syncBillboardAvailability = () => {
             // substring matching against user-authored text was flipping the
             // wrong side when details mentioned the opposite face in prose.
             const side = contract.side ?? (
-                contract.details.includes('Side A & B') ? 'Both'
-                : contract.details.includes('Side A') ? 'A'
-                : contract.details.includes('Side B') ? 'B'
+                contract.details?.includes('Side A & B') ? 'Both'
+                : contract.details?.includes('Side A') ? 'A'
+                : contract.details?.includes('Side B') ? 'B'
                 : undefined
             );
             if (side === 'A' || side === 'Both') {
+                t.staticA += 1;
                 board.sideAStatus = 'Rented';
                 board.sideAClientId = contract.clientId;
             }
             if (side === 'B' || side === 'Both') {
+                t.staticB += 1;
                 board.sideBStatus = 'Rented';
                 board.sideBClientId = contract.clientId;
             }
+        } else if (board.type === BillboardType.LED) {
+            if (typeof contract.slotNumber === 'number' && contract.slotNumber > 0) {
+                t.ledSlots.set(contract.slotNumber, (t.ledSlots.get(contract.slotNumber) || 0) + 1);
+            } else {
+                t.ledUnnumbered += 1;
+            }
+        }
+    });
+
+    // Apply tallies → rentedSlots + overbooking diagnostics.
+    resetBillboards.forEach(board => {
+        const t = tallies.get(board.id);
+        if (!t) return;
+        const issues: string[] = [];
+        if (board.type === BillboardType.Static) {
+            if (t.staticA > 1) issues.push(`Side A: ${t.staticA} active contracts`);
+            if (t.staticB > 1) issues.push(`Side B: ${t.staticB} active contracts`);
         } else if (board.type === BillboardType.LED) {
             // If totalSlots is unset we treat capacity as 0 (consistent with
             // Dashboard/Availability). A board without configured slots can't
             // accumulate rentedSlots — surfaces the data issue instead of
             // silently clamping against a fake default of 10.
             const cap = board.totalSlots || 0;
-            board.rentedSlots = Math.min((board.rentedSlots || 0) + 1, cap);
+            const uniqueNumberedSlots = t.ledSlots.size;
+            board.rentedSlots = Math.min(uniqueNumberedSlots + t.ledUnnumbered, cap);
+            t.ledSlots.forEach((count, slot) => {
+                if (count > 1) issues.push(`Slot ${slot}: ${count} active contracts`);
+            });
+            const totalClaims = Array.from(t.ledSlots.values()).reduce((a, b) => a + b, 0) + t.ledUnnumbered;
+            if (cap > 0 && totalClaims > cap) {
+                issues.push(`Capacity overflow: ${totalClaims} claims on ${cap} slots`);
+            }
+        }
+        if (issues.length > 0) {
+            board.overbooked = true;
+            board.overbookingDetail = issues.join('; ');
         }
     });
 
@@ -1115,6 +1188,10 @@ export const getOutsourcedBillboards = () => outsourcedBillboards || [];
 export const getMaintenanceLogs = () => maintenanceLogs || [];
 export const getCompanyLogo = () => companyLogo;
 export const getCompanyProfile = () => companyProfile;
+// Default currency used when creating new inventory/contracts/invoices/
+// expenses. Falls back to USD so a profile that pre-dates the dual-currency
+// rollout still has a valid default.
+export const getDefaultCurrency = (): 'USD' | 'ZWG' => (companyProfile.defaultCurrency as any) || 'USD';
 
 export const resetSystemData = () => {
     // Log BEFORE clearing — localStorage.clear() wipes the local audit mirror,
@@ -1129,12 +1206,33 @@ export const findUserByEmail = (email: string) => users.find(u => u.email.toLowe
 
 export const getPendingInvoices = () => invoices.filter(inv => inv.status === 'Pending' && inv.type === 'Invoice');
 
+// Legacy scalar totals are kept (some callers still expect plain numbers),
+// but byCurrency maps are the source of truth for dual-currency rendering.
+// Per-currency balance is billed − paid in each denomination; we never
+// attempt to net USD against ZWG.
 export const getClientFinancials = (clientId: string) => {
     const clientInvoices = invoices.filter(i => i.clientId === clientId && i.type === 'Invoice');
     const clientReceipts = invoices.filter(i => i.clientId === clientId && i.type === 'Receipt');
     const totalBilled = clientInvoices.reduce((acc, curr) => acc + curr.total, 0);
     const totalPaid = clientReceipts.reduce((acc, curr) => acc + curr.total, 0);
-    return { totalBilled, totalPaid, balance: totalBilled - totalPaid };
+
+    const bumpCurrency = (map: Record<string, number>, currency: string | undefined, amount: number) => {
+        const code = (currency || 'USD').toUpperCase();
+        map[code] = (map[code] || 0) + amount;
+    };
+    const billedByCurrency: Record<string, number> = {};
+    const paidByCurrency: Record<string, number> = {};
+    clientInvoices.forEach(i => bumpCurrency(billedByCurrency, i.currency, i.total));
+    clientReceipts.forEach(i => bumpCurrency(paidByCurrency, i.currency, i.total));
+    const balanceByCurrency: Record<string, number> = {};
+    new Set([...Object.keys(billedByCurrency), ...Object.keys(paidByCurrency)]).forEach(code => {
+        balanceByCurrency[code] = (billedByCurrency[code] || 0) - (paidByCurrency[code] || 0);
+    });
+
+    return {
+        totalBilled, totalPaid, balance: totalBilled - totalPaid,
+        billedByCurrency, paidByCurrency, balanceByCurrency,
+    };
 };
 
 export const getTransactions = (clientId: string) => invoices.filter(i => i.clientId === clientId && (i.type === 'Invoice' || i.type === 'Receipt')).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
@@ -1146,6 +1244,9 @@ export const getNextBillingDetails = (clientId: string) => {
     let earliestDate: Date | null = null;
     let totalAmount = 0;
     const billDays = new Set<number>();
+    // Track per-currency totals so mixed USD/ZWG clients render truthfully
+    // instead of collapsing into a misleading single number.
+    const amountByCurrency: Record<string, number> = {};
 
     if (client && client.billingDay) {
          billDays.add(client.billingDay);
@@ -1153,6 +1254,10 @@ export const getNextBillingDetails = (clientId: string) => {
          if (targetDate <= today) targetDate = new Date(today.getFullYear(), today.getMonth() + 1, client.billingDay);
          earliestDate = targetDate;
          totalAmount = activeContracts.reduce((acc, c) => acc + c.monthlyRate, 0);
+         activeContracts.forEach(c => {
+             const code = (c.currency || 'USD').toUpperCase();
+             amountByCurrency[code] = (amountByCurrency[code] || 0) + c.monthlyRate;
+         });
     } else {
         if (activeContracts.length === 0) return null;
         activeContracts.forEach(c => {
@@ -1163,14 +1268,25 @@ export const getNextBillingDetails = (clientId: string) => {
             if (targetDate <= today) targetDate = new Date(today.getFullYear(), today.getMonth() + 1, day);
             if (!earliestDate || targetDate < earliestDate) earliestDate = targetDate;
             totalAmount += c.monthlyRate;
+            const code = (c.currency || 'USD').toUpperCase();
+            amountByCurrency[code] = (amountByCurrency[code] || 0) + c.monthlyRate;
         });
     }
     if (totalAmount === 0 && activeContracts.length === 0) return null;
-    return { date: earliestDate ? earliestDate.toLocaleDateString() : 'N/A', amount: totalAmount, days: Array.from(billDays).sort((a,b) => a-b) };
+    // Dominant currency = the one with the largest summed monthlyRate.
+    const dominantCurrency =
+        Object.entries(amountByCurrency).sort((a, b) => b[1] - a[1])[0]?.[0] || 'USD';
+    return {
+        date: earliestDate ? earliestDate.toLocaleDateString() : 'N/A',
+        amount: totalAmount,
+        amountByCurrency,
+        currency: dominantCurrency,
+        days: Array.from(billDays).sort((a,b) => a-b),
+    };
 };
 
 export const getUpcomingBillings = () => {
-    const results: { clientName: string; date: string; amount: number; day: string }[] = [];
+    const results: { clientName: string; date: string; amount: number; currency: string; amountByCurrency: Record<string, number>; day: string }[] = [];
     clients.forEach(client => {
         const details = getNextBillingDetails(client.id);
         if (details && details.date !== 'N/A') {
@@ -1181,7 +1297,14 @@ export const getUpcomingBillings = () => {
                 if (j === 3 && k !== 13) return d + "rd";
                 return d + "th";
             }).join(', ');
-            results.push({ clientName: client.companyName, date: details.date, amount: details.amount, day: formattedDays });
+            results.push({
+                clientName: client.companyName,
+                date: details.date,
+                amount: details.amount,
+                currency: details.currency,
+                amountByCurrency: details.amountByCurrency,
+                day: formattedDays,
+            });
         }
     });
     return results.sort((a, b) => new Date(a.date).getTime() - new Date(a.date).getTime());
@@ -1317,6 +1440,22 @@ export const bulkAddContracts = async (newContracts: Contract[]) => {
     logAction('Bulk Import', `Imported ${newContracts.length} contracts`);
 };
 
+export const updateContract = (updated: Contract) => {
+    contracts = contracts.map(c => c.id === updated.id ? updated : c);
+    saveToStorage(STORAGE_KEYS.CONTRACTS, contracts);
+    syncBillboardAvailability();
+    logAction('Update Contract', `Updated contract ${updated.id}`);
+};
+
+export const setContractStatus = (id: string, status: Contract['status']) => {
+    const contract = contracts.find(c => c.id === id);
+    if (!contract) return;
+    contracts = contracts.map(c => c.id === id ? { ...c, status } : c);
+    saveToStorage(STORAGE_KEYS.CONTRACTS, contracts);
+    syncBillboardAvailability();
+    logAction('Contract Status', `Set contract ${id} to ${status}`);
+};
+
 export const deleteContract = (id: string) => {
     const contract = contracts.find(c => c.id === id);
     if(contract) {
@@ -1328,9 +1467,9 @@ export const deleteContract = (id: string) => {
     }
 };
 
-export const addInvoice = (invoice: Invoice) => { invoices = [invoice, ...invoices]; saveToStorage(STORAGE_KEYS.INVOICES, invoices); logAction('Create Invoice', `Created ${invoice.type} #${invoice.id} ($${invoice.total})`); };
+export const addInvoice = (invoice: Invoice) => { invoices = [invoice, ...invoices]; saveToStorage(STORAGE_KEYS.INVOICES, invoices); logAction('Create Invoice', `Created ${invoice.type} #${invoice.id} (${invoice.currency || 'USD'} ${invoice.total})`); };
 export const markInvoiceAsPaid = (id: string) => { invoices = invoices.map(i => i.id === id ? { ...i, status: 'Paid' } : i); saveToStorage(STORAGE_KEYS.INVOICES, invoices); logAction('Payment', `Marked Invoice #${id} as Paid`); };
-export const addExpense = (expense: Expense) => { expenses = [expense, ...expenses]; saveToStorage(STORAGE_KEYS.EXPENSES, expenses); logAction('Expense', `Recorded expense: ${expense.description} ($${expense.amount})`); };
+export const addExpense = (expense: Expense) => { expenses = [expense, ...expenses]; saveToStorage(STORAGE_KEYS.EXPENSES, expenses); logAction('Expense', `Recorded expense: ${expense.description} (${expense.currency || 'USD'} ${expense.amount})`); };
 
 export const addClient = (client: Client) => { 
     clients = [...clients, client]; 
