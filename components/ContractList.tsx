@@ -4,8 +4,9 @@ import { mockContracts, mockClients, mockBillboards, getContracts, updateContrac
 import { useToast } from './Toast';
 import { generateContractPDF, generateContractsReportPDF } from '../services/pdfGenerator';
 import { emailContract } from '../services/emailService';
-import { Contract, VAT_RATE } from '../types';
+import { Contract } from '../types';
 import { formatCurrency } from '../utils/sanitizers';
+import { computeContractValue } from '../utils/contractMath';
 import { FileText, Calendar, Download, Eye, Clock, Plus as PlusIcon, FileDown, Mail, Loader2, PencilLine, Save, Archive, AlertTriangle, RotateCcw } from 'lucide-react';
 import { AccessibleModal, ModalButton } from './ui/AccessibleModal';
 
@@ -24,11 +25,6 @@ const MinimalInput = ({ label, value, onChange, type = 'text', required = false,
     <label className="absolute left-0 -top-2.5 text-xs text-slate-400 font-medium transition-all peer-placeholder-shown:text-sm peer-placeholder-shown:text-slate-400 peer-placeholder-shown:top-2.5 peer-focus:-top-2.5 peer-focus:text-xs peer-focus:text-slate-800 uppercase tracking-wide">{label}</label>
   </div>
 );
-
-const recomputeTotal = (c: Contract): number => {
-  const subtotal = (Number(c.monthlyRate) || 0) * 12 + (Number(c.installationCost) || 0) + (Number(c.printingCost) || 0);
-  return c.hasVat ? subtotal + subtotal * VAT_RATE : subtotal;
-};
 
 export const ContractList: React.FC = () => {
   const toast = useToast();
@@ -84,7 +80,7 @@ export const ContractList: React.FC = () => {
   const handleSaveEdit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingContract) return;
-    const next: Contract = { ...editingContract, totalContractValue: recomputeTotal(editingContract) };
+    const next: Contract = { ...editingContract, totalContractValue: computeContractValue(editingContract) };
     updateContract(next);
     setContracts(getContracts());
     setEditingContract(null);

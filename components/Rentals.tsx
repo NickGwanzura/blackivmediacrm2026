@@ -1,14 +1,22 @@
 
 import React, { useState, useEffect } from 'react';
-import { getContracts, getBillboards, addContract, addInvoice, mockClients, deleteContract, getDefaultCurrency } from '../services/mockData';
+import { getContracts, getBillboards, addContract, addInvoice, mockClients, deleteContract, getDefaultCurrency, updateContract, setContractStatus } from '../services/mockData';
 import { useToast } from './Toast';
 import { generateContractPDF, generateMasterContractPDF, generateActiveRentalsPDF } from '../services/pdfGenerator';
 import { emailContract } from '../services/emailService';
 import { generateRentalProposal } from '../services/aiService';
-import { Contract, BillboardType, VAT_RATE, Invoice, Currency } from '../types';
-import { FileText, Calendar, Download, Eye, Plus, Wand2, RefreshCw, CheckCircle, Trash2, Sparkles, Layers, ShoppingCart, MinusCircle, FileDown, Mail, Loader2, Receipt } from 'lucide-react';
+import { Contract, BillboardType, VAT_RATE, Invoice, Currency, CURRENCIES } from '../types';
+import { FileText, Calendar, Download, Eye, Plus, Wand2, RefreshCw, CheckCircle, Trash2, Sparkles, Layers, ShoppingCart, MinusCircle, FileDown, Mail, Loader2, Receipt, PencilLine, AlertTriangle, Archive, Save } from 'lucide-react';
 import { AccessibleModal, ModalButton } from './ui/AccessibleModal';
 import { formatCurrency } from '../utils/sanitizers';
+import { computeContractValue, monthsBetween } from '../utils/contractMath';
+
+const STATUS_STYLES: Record<Contract['status'], string> = {
+  Active: 'bg-emerald-50 text-emerald-700 border-emerald-100',
+  Pending: 'bg-amber-50 text-amber-700 border-amber-100',
+  Expired: 'bg-rose-50 text-rose-700 border-rose-100',
+  Archived: 'bg-slate-100 text-slate-600 border-slate-200',
+};
 
 const MinimalInput = ({ label, value, onChange, type = "text", required = false, disabled = false }: any) => {
   const isDate = type === 'date';
@@ -69,6 +77,10 @@ export const Rentals: React.FC = () => {
   const [selectedRental, setSelectedRental] = useState<Contract | null>(null);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [rentalToDelete, setRentalToDelete] = useState<Contract | null>(null);
+  // Edit in-place: clone into state so a cancelled edit leaves the list
+  // untouched. Totals are recomputed from the staged clone on submit via
+  // computeContractValue so the saved row is always internally consistent.
+  const [editingContract, setEditingContract] = useState<Contract | null>(null);
   const [aiProposal, setAiProposal] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [billboards, setBillboards] = useState(getBillboards()); // Local state to ensure freshness
@@ -266,6 +278,7 @@ export const Rentals: React.FC = () => {
   const handleBatchCreate = async () => {
       if (batchItems.length === 0) { toast.warning("Please add at least one asset to the batch."); return; }
       if (!formData.clientId || !formData.startDate || !formData.endDate) { toast.warning("Please fill in Client and Date fields."); return; }
+      if (monthsBetween(formData.startDate, formData.endDate) <= 0) { toast.warning('End date must be after start date.'); return; }
 
       const createdContractIds: string[] = [];
       const invoiceItems: { description: string; amount: number }[] = [];
@@ -279,9 +292,6 @@ export const Rentals: React.FC = () => {
       // Create Contracts
       batchItems.forEach(item => {
           const contractId = `C-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-          const subtotal = (item.monthlyRate * 12) + item.installationCost + item.printingCost; // Basic annual est for value, but invoice is monthly
-          const vat = formData.hasVat ? subtotal * VAT_RATE : 0;
-
           const contract: Contract = {
               id: contractId,
               clientId: formData.clientId,
@@ -293,7 +303,14 @@ export const Rentals: React.FC = () => {
               installationCost: item.installationCost,
               printingCost: item.printingCost,
               hasVat: formData.hasVat,
-              totalContractValue: subtotal + vat,
+              totalContractValue: computeContractValue({
+                  startDate: formData.startDate,
+                  endDate: formData.endDate,
+                  monthlyRate: item.monthlyRate,
+                  installationCost: item.installationCost,
+                  printingCost: item.printingCost,
+                  hasVat: formData.hasVat,
+              }),
               status: 'Active',
               side: item.side,
               slotNumber: item.slotNumber,
@@ -357,9 +374,11 @@ export const Rentals: React.FC = () => {
             return;
         }
     }
+    if (monthsBetween(formData.startDate, formData.endDate) <= 0) {
+        toast.warning('End date must be after start date.');
+        return;
+    }
 
-    const subtotal = (formData.monthlyRate * 12) + formData.installationCost + formData.printingCost;
-    const vat = formData.hasVat ? subtotal * VAT_RATE : 0;
     const rentalId = `C-${Date.now().toString().slice(-4)}`;
     
     let detailText = selectedBillboard?.type === BillboardType.Static 
@@ -378,7 +397,14 @@ export const Rentals: React.FC = () => {
         installationCost: formData.installationCost,
         printingCost: formData.printingCost,
         hasVat: formData.hasVat,
-        totalContractValue: subtotal + vat,
+        totalContractValue: computeContractValue({
+            startDate: formData.startDate,
+            endDate: formData.endDate,
+            monthlyRate: formData.monthlyRate,
+            installationCost: formData.installationCost,
+            printingCost: formData.printingCost,
+            hasVat: formData.hasVat,
+        }),
         status: 'Active',
         side: selectedBillboard?.type === BillboardType.Static ? formData.side : undefined,
         slotNumber: selectedBillboard?.type === BillboardType.LED ? formData.slotNumber : undefined,
@@ -435,13 +461,57 @@ export const Rentals: React.FC = () => {
       if (rentalToDelete) {
           deleteContract(rentalToDelete.id);
           setRentals(getContracts());
-          setBillboards([...getBillboards()]); 
+          setBillboards([...getBillboards()]);
           setRentalToDelete(null);
       }
   };
 
   const handleDownloadActiveReport = () => {
       generateActiveRentalsPDF(rentals, getClientName, getBillboardName);
+  };
+
+  // Edit / status transitions. Mirrors ContractList.tsx so both surfaces use
+  // the same service helpers (updateContract / setContractStatus) and keep
+  // billboard occupancy in sync via syncBillboardAvailability.
+  const handleSaveEdit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingContract) return;
+    const next: Contract = { ...editingContract, totalContractValue: computeContractValue(editingContract) };
+    updateContract(next);
+    setRentals(getContracts());
+    setBillboards([...getBillboards()]);
+    setEditingContract(null);
+    toast.success(`Contract ${next.id} updated.`);
+  };
+
+  const handleMarkExpired = async (contract: Contract) => {
+    if (contract.status === 'Expired') return;
+    const ok = await toast.confirm({
+      title: 'Mark as Expired',
+      message: `Mark contract ${contract.id} for ${getClientName(contract.clientId)} as Expired? This frees the asset for re-rental.`,
+      variant: 'default',
+      confirmLabel: 'Mark Expired',
+    });
+    if (!ok) return;
+    setContractStatus(contract.id, 'Expired');
+    setRentals(getContracts());
+    setBillboards([...getBillboards()]);
+    toast.success(`Contract ${contract.id} marked Expired.`);
+  };
+
+  const handleArchive = async (contract: Contract) => {
+    if (contract.status === 'Archived') return;
+    const ok = await toast.confirm({
+      title: 'Archive Contract',
+      message: `Archive contract ${contract.id}? It will be hidden from Rentals. Restore it from Contracts → Archived.`,
+      variant: 'default',
+      confirmLabel: 'Archive',
+    });
+    if (!ok) return;
+    setContractStatus(contract.id, 'Archived');
+    setRentals(getContracts());
+    setBillboards([...getBillboards()]);
+    toast.success(`Contract ${contract.id} archived.`);
   };
 
   return (
@@ -463,14 +533,19 @@ export const Rentals: React.FC = () => {
         </div>
 
         <div className="grid gap-4">
-          {rentals.map(contract => (
+          {/* Archived contracts are hidden from Rentals (use Contracts → Archived to restore).
+              Rentals is the "what's live right now" view; anything Archived shouldn't clutter it. */}
+          {rentals.filter(c => c.status !== 'Archived').map(contract => (
             <div key={contract.id} className="bg-white rounded-2xl p-4 sm:p-6 border border-slate-100 shadow-sm hover:shadow-xl transition-all flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6 group hover:-translate-y-0.5 duration-300">
               <div className="flex items-start gap-4 w-full lg:w-auto">
                 <div className="p-3 sm:p-4 bg-indigo-50 rounded-2xl group-hover:bg-indigo-600 transition-colors group-hover:text-white text-indigo-600 shrink-0">
                   <FileText className="w-5 h-5 sm:w-6 sm:h-6" />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <h3 className="font-bold text-slate-900 text-base sm:text-lg truncate">{getClientName(contract.clientId)}</h3>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="font-bold text-slate-900 text-base sm:text-lg truncate">{getClientName(contract.clientId)}</h3>
+                    <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${STATUS_STYLES[contract.status]}`}>{contract.status}</span>
+                  </div>
                   <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 text-xs sm:text-sm text-slate-500 mt-1">
                     <span className="font-medium text-slate-700 truncate">{getBillboardName(contract.billboardId)}</span>
                     <span className="hidden sm:inline text-slate-300">•</span>
@@ -496,15 +571,26 @@ export const Rentals: React.FC = () => {
                     </div>
                 </div>
                 
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap justify-end">
                     <button onClick={() => setSelectedRental(contract)} className="px-3 py-2 text-[10px] sm:text-xs font-bold uppercase tracking-wider text-slate-500 hover:text-slate-900 hover:bg-slate-50 rounded-lg transition-colors flex items-center gap-1">
                         <Eye size={14} /> <span className="hidden sm:inline">View</span>
+                    </button>
+                    <button onClick={() => setEditingContract({ ...contract })} className="px-3 py-2 text-[10px] sm:text-xs font-bold uppercase tracking-wider text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg transition-colors flex items-center gap-1" title="Edit Contract">
+                        <PencilLine size={14} /> <span className="hidden sm:inline">Edit</span>
                     </button>
                     <button onClick={() => { const client = getClient(contract.clientId); if(client) generateContractPDF(contract, client, getBillboardName(contract.billboardId)); }} className="px-3 py-2 text-[10px] sm:text-xs font-bold uppercase tracking-wider text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors flex items-center gap-1 shadow-lg hover:shadow-slate-500/30">
                         <Download size={14} /> <span className="hidden sm:inline">PDF</span>
                     </button>
                     <button onClick={() => handleEmailContract(contract)} disabled={emailingContractId === contract.id} title={(() => { const c = getClient(contract.clientId); return c?.email ? `Email to ${c.email}` : 'No client email on file'; })()} className="px-3 py-2 text-[10px] sm:text-xs font-bold uppercase tracking-wider text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors flex items-center gap-1 disabled:opacity-50">
                         {emailingContractId === contract.id ? <Loader2 size={14} className="animate-spin" /> : <Mail size={14} />} <span className="hidden sm:inline">Email</span>
+                    </button>
+                    {contract.status === 'Active' && (
+                        <button onClick={() => handleMarkExpired(contract)} className="px-3 py-2 text-[10px] sm:text-xs font-bold uppercase tracking-wider text-rose-600 bg-white border border-rose-100 hover:bg-rose-50 rounded-lg transition-colors flex items-center gap-1" title="Mark as Expired (frees the asset)">
+                            <AlertTriangle size={14} /> <span className="hidden sm:inline">Expire</span>
+                        </button>
+                    )}
+                    <button onClick={() => handleArchive(contract)} className="px-3 py-2 text-[10px] sm:text-xs font-bold uppercase tracking-wider text-slate-500 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors flex items-center gap-1" title="Archive Contract">
+                        <Archive size={14} /> <span className="hidden sm:inline">Archive</span>
                     </button>
                     <button onClick={() => setRentalToDelete(contract)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="Delete Rental">
                         <Trash2 size={16} />
@@ -726,6 +812,69 @@ export const Rentals: React.FC = () => {
         }
       >
         <></>
+      </AccessibleModal>
+
+      {/* Edit Rental modal. Editing client/billboard is intentionally
+          disabled — those are identity-like anchors used by invoices, the
+          occupancy sync, and the billing schedule. Change rate / dates /
+          costs / VAT / currency / status here; create a fresh contract if
+          the client or asset needs to change. */}
+      <AccessibleModal
+        isOpen={!!editingContract}
+        onClose={() => setEditingContract(null)}
+        title={editingContract ? `Edit Rental ${editingContract.id}` : 'Edit Rental'}
+        description={editingContract ? `${getClientName(editingContract.clientId)} — ${getBillboardName(editingContract.billboardId)}` : undefined}
+        size="lg"
+        icon={<PencilLine size={20} />}
+        mobileLayout="sheet"
+        footer={
+          <>
+            <ModalButton variant="secondary" onClick={() => setEditingContract(null)}>Cancel</ModalButton>
+            <ModalButton variant="primary" type="submit" form="rental-edit-form"><Save size={14} /> Save Changes</ModalButton>
+          </>
+        }
+      >
+        {editingContract && (
+          <form id="rental-edit-form" onSubmit={handleSaveEdit} className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <MinimalInput label="Start Date" type="date" value={editingContract.startDate} onChange={(e: any) => setEditingContract({ ...editingContract, startDate: e.target.value })} required />
+              <MinimalInput label="End Date" type="date" value={editingContract.endDate} onChange={(e: any) => setEditingContract({ ...editingContract, endDate: e.target.value })} required />
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <MinimalInput label={`Monthly Rate (${editingContract.currency || 'USD'})`} type="number" value={editingContract.monthlyRate} onChange={(e: any) => setEditingContract({ ...editingContract, monthlyRate: Number(e.target.value) })} required />
+              <MinimalInput label={`Install Fee (${editingContract.currency || 'USD'})`} type="number" value={editingContract.installationCost} onChange={(e: any) => setEditingContract({ ...editingContract, installationCost: Number(e.target.value) })} />
+              <MinimalInput label={`Print Cost (${editingContract.currency || 'USD'})`} type="number" value={editingContract.printingCost} onChange={(e: any) => setEditingContract({ ...editingContract, printingCost: Number(e.target.value) })} />
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <MinimalSelect label="Currency" value={editingContract.currency || 'USD'} onChange={(e: any) => setEditingContract({ ...editingContract, currency: e.target.value as Currency })} options={CURRENCIES.map(c => ({ value: c, label: c }))} />
+              <MinimalSelect label="Status" value={editingContract.status} onChange={(e: any) => setEditingContract({ ...editingContract, status: e.target.value as Contract['status'] })} options={[
+                { value: 'Active', label: 'Active' },
+                { value: 'Pending', label: 'Pending' },
+                { value: 'Expired', label: 'Expired' },
+                { value: 'Archived', label: 'Archived' },
+              ]} />
+              <MinimalInput label="Details" value={editingContract.details} onChange={(e: any) => setEditingContract({ ...editingContract, details: e.target.value })} />
+            </div>
+            <label className="flex items-center gap-3 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={editingContract.hasVat}
+                onChange={(e) => setEditingContract({ ...editingContract, hasVat: e.target.checked })}
+                className="w-4 h-4 accent-slate-900"
+              />
+              <span className="text-sm font-medium text-slate-700">Apply VAT ({Math.round(VAT_RATE * 100)}%)</span>
+            </label>
+            {/* Live recompute chip so editors see the saved total before they
+                commit. Uses the same computeContractValue helper as create so
+                both paths produce identical values. */}
+            <div className="bg-slate-50 rounded-xl border border-slate-100 p-4 flex justify-between items-center">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                Recomputed Total · {monthsBetween(editingContract.startDate, editingContract.endDate).toFixed(1)} months
+              </span>
+              <span className="text-lg font-bold text-slate-900">{formatCurrency(computeContractValue(editingContract), editingContract.currency)}</span>
+            </div>
+          </form>
+        )}
       </AccessibleModal>
     </>
   );

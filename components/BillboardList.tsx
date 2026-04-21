@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Billboard, BillboardType, Client, Contract, Currency, CURRENCIES } from '../types';
 import { getBillboards, addBillboard, updateBillboard, deleteBillboard, mockClients, ZIM_TOWNS, getClients, updateClient, bulkAddBillboards, bulkAddClients, bulkAddContracts, bulkUpdateBillboards, getDefaultCurrency } from '../services/mockData';
 import { formatCurrency } from '../utils/sanitizers';
+import { computeContractValue } from '../utils/contractMath';
 import { estimateLocationDetails } from '../services/aiService';
 import { MapPin, X, Edit2, Plus, Image as ImageIcon, Map as MapIcon, Grid as GridIcon, Trash2, Share2, Eye, EyeOff, Copy, List as ListIcon, Search, Link2, FileUp, FileDown, Sparkles, Loader2, Filter, Check, RefreshCw, RectangleHorizontal } from 'lucide-react';
 import L from 'leaflet';
@@ -488,7 +489,14 @@ export const BillboardList: React.FC<BillboardListProps> = ({ readOnly = false }
                           installationCost: 0,
                           printingCost: 0,
                           hasVat: true,
-                          totalContractValue: monthlyRate * 12,
+                          totalContractValue: computeContractValue({
+                              startDate,
+                              endDate,
+                              monthlyRate,
+                              installationCost: 0,
+                              printingCost: 0,
+                              hasVat: true,
+                          }),
                           status: 'Active',
                           details: contractDetails,
                           side: isSideA ? 'A' : isSideB ? 'B' : isBoth ? 'Both' : undefined
